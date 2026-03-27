@@ -1,0 +1,55 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: smart-trade-backend
+  profiles:
+    active: dev
+  
+  # 数据源配置 (请在本地MySQL创建smart_trade数据库)
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/smart_trade?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false
+    username: root
+    password: 123456 # 根据本地环境修改
+    
+  # Redis 缓存配置 (保存Token与行情缓存)
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 0
+      timeout: 10000ms
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  # 实体扫描，多个package用逗号或者分号分隔
+  type-aliases-package: com.smarttrade.entity
+  global-config:
+    db-config:
+      # 全局逻辑删除字段(如有)
+      # logic-delete-field: deleted
+      # logic-delete-value: 1
+      # logic-not-delete-value: 0
+      # id类型：ASSIGN_ID (雪花算法)
+      id-type: auto
+  configuration:
+    # 开启驼峰命名
+    map-underscore-to-camel-case: true
+    # 打印 SQL 方便排查
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# JWT 密钥配置 (需至少256位长)
+jwt:
+  secret: a8f0a3g9k1m2n3p4q5r6s7t8u9v0w1x2y3z4A5B6C7D8E9F0G1H2I3J4K5L6M7N8O9P
+  expiration: 86400000 # 24小时
+
+# Knife4j API 文档基础信息
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn

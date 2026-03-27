@@ -1,0 +1,16 @@
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\WebMvcConfig.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\dto\RegisterDTO.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\dto\LoginDTO.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\utils\JwtUtils.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\JwtInterceptor.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\common\Result.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\SystemTestController.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\UserService.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\UserMapper.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\SmartTradeApplication.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\common\GlobalExceptionHandler.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\UserController.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\MyBatisPlusConfig.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\impl\UserServiceImpl.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\utils\UserContext.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\entity\User.java
