@@ -3,52 +3,60 @@
     <main class="p-6 max-w-[1600px] mx-auto space-y-6">
 
       <!-- 顶部页签 -->
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <div class="text-xs text-gray-500 tracking-widest font-mono">MARKET / REALTIME</div>
+          <div class="text-xs text-gray-500 tracking-widest font-mono">行情 · 实时</div>
           <div class="text-2xl font-bold text-gray-100 mt-1 flex items-center gap-2">
             <el-icon class="text-blue-400"><TrendCharts /></el-icon>
             行情中心
           </div>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap">
+          <el-input
+            v-model="search"
+            placeholder="输入股票代码或名称搜索"
+            clearable
+            size="default"
+            class="!w-72"
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-button type="primary" plain :loading="loadingQuotes" @click="loadQuotes">
             <el-icon class="mr-1"><Refresh /></el-icon>
             刷新行情
           </el-button>
           <div class="text-xs text-gray-500 font-mono">
-            数据源：东方财富 · 自动刷新 30s
+            数据源：东方财富 · 自动刷新 30 秒
           </div>
         </div>
       </div>
 
-      <!-- 行情表 + K 线 -->
-      <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <!-- 行情列表 -->
+      <div class="chart-card overflow-hidden">
+        <div class="border-b border-white/5 pb-3 mb-4 flex justify-between items-center">
+          <span class="text-xs font-semibold tracking-widest text-cyan-400 flex items-center gap-2">
+            <DataLine class="w-4 h-4" /> 沪深主流股票实时行情
+          </span>
+          <span class="text-[10px] text-gray-500 font-mono">
+            <span v-if="search">筛选 {{ filteredQuotes.length }} / </span>共 {{ quotes.length }} 支 · 点击查看 K 线
+          </span>
+        </div>
 
-        <!-- 左侧行情列表 -->
-        <div class="xl:col-span-2 chart-card overflow-hidden">
-          <div class="border-b border-white/5 pb-3 mb-4 flex justify-between items-center">
-            <span class="text-xs font-semibold tracking-widest text-cyan-400 flex items-center gap-2">
-              <DataLine class="w-4 h-4" /> 自选股票池实时行情
-            </span>
-            <span class="text-[10px] text-gray-500 font-mono">
-              共 {{ quotes.length }} 支
-            </span>
-          </div>
-
-          <div class="relative">
-            <div v-if="loadingQuotes" class="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm rounded-lg">
-              <div class="text-cyan-400 text-xs tracking-widest font-mono flex items-center gap-2">
-                <el-icon class="animate-spin"><Loading /></el-icon> 行情加载中...
-              </div>
+        <div class="relative">
+          <div v-if="loadingQuotes" class="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm rounded-lg">
+            <div class="text-cyan-400 text-xs tracking-widest font-mono flex items-center gap-2">
+              <el-icon class="animate-spin"><Loading /></el-icon> 行情加载中...
             </div>
+          </div>
           <el-table
-            :data="quotes"
+            :data="filteredQuotes"
             highlight-current-row
-            :row-class-name="rowClass"
             @row-click="handleSelect"
             stripe
-            max-height="580"
+            max-height="720"
+            empty-text="未找到匹配的股票"
             style="width: 100%; background: transparent;"
             class="market-table"
           >
@@ -91,57 +99,80 @@
               </template>
             </el-table-column>
           </el-table>
+        </div>
+      </div>
+    </main>
+
+    <!-- K 线弹窗 -->
+    <el-dialog
+      v-model="dialogVisible"
+      width="90%"
+      top="5vh"
+      :show-close="true"
+      :close-on-click-modal="false"
+      :destroy-on-close="true"
+      append-to-body
+      class="kline-dialog"
+      @opened="onDialogOpened"
+      @closed="onDialogClosed"
+    >
+      <template #header>
+        <div class="flex items-center justify-between pr-8">
+          <div class="flex items-center gap-3">
+            <el-icon class="text-cyan-400"><DataAnalysis /></el-icon>
+            <span class="text-base text-gray-100 font-bold">{{ selected?.stockName || '--' }}</span>
+            <span class="text-gray-500 text-xs font-mono">{{ selected?.stockCode }}</span>
+            <span class="text-gray-500 text-xs">{{ selected?.industryName || selected?.plateType || '' }}</span>
+          </div>
+          <div v-if="selected" :class="priceColor(selected)" class="font-mono text-base mr-3">
+            {{ formatNum(selected.latestPrice) }}
+            <span class="text-xs ml-1">{{ formatPercent(selected.changePercent) }}</span>
           </div>
         </div>
+      </template>
 
-        <!-- 右侧 K 线 -->
-        <div class="chart-card flex flex-col h-[640px]">
-          <div class="border-b border-white/5 pb-3 mb-4">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold tracking-widest text-cyan-400 flex items-center gap-2">
-                <DataAnalysis class="w-4 h-4" /> 个股 K 线
-              </span>
-              <el-radio-group v-model="klineLimit" size="small" @change="loadKline">
-                <el-radio-button :value="60">60日</el-radio-button>
-                <el-radio-button :value="120">120日</el-radio-button>
-                <el-radio-button :value="250">1年</el-radio-button>
-              </el-radio-group>
-            </div>
-            <div class="mt-2 flex items-center justify-between" v-if="selected">
-              <div>
-                <span class="text-base text-gray-100 font-bold">{{ selected.stockName }}</span>
-                <span class="text-gray-500 text-xs ml-2 font-mono">{{ selected.stockCode }}</span>
-              </div>
-              <div :class="priceColor(selected)" class="font-mono text-sm">
-                {{ formatNum(selected.latestPrice) }}
-                ({{ formatPercent(selected.changePercent) }})
-              </div>
-            </div>
-          </div>
+      <div v-if="selected" class="flex flex-col gap-4">
+        <!-- 关键数据展示卡片 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div class="stat-cell"><div class="stat-label">今开</div><div class="stat-val">{{ formatNum(selected.openPrice) }}</div></div>
+          <div class="stat-cell"><div class="stat-label">昨收</div><div class="stat-val">{{ formatNum(selected.preClosePrice) }}</div></div>
+          <div class="stat-cell"><div class="stat-label">最高</div><div class="stat-val text-red-400">{{ formatNum(selected.highPrice) }}</div></div>
+          <div class="stat-cell"><div class="stat-label">最低</div><div class="stat-val text-green-400">{{ formatNum(selected.lowPrice) }}</div></div>
+          <div class="stat-cell"><div class="stat-label">涨跌额</div><div class="stat-val" :class="priceColor(selected)">{{ formatNum(selected.changeAmount) }}</div></div>
+          <div class="stat-cell"><div class="stat-label">换手率</div><div class="stat-val">{{ formatPercent(selected.turnoverRate) }}</div></div>
+          <div class="stat-cell"><div class="stat-label">成交额</div><div class="stat-val">{{ formatAmount(selected.turnoverAmount) }}</div></div>
+        </div>
 
-          <div class="relative flex-1 w-full">
-            <div ref="klineRef" class="absolute inset-0"></div>
-            <div v-if="loadingKline" class="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div class="text-cyan-400 text-xs tracking-widest font-mono flex items-center gap-2">
-                <el-icon class="animate-spin"><Loading /></el-icon> K 线加载中...
-              </div>
-            </div>
-            <div v-if="!selected && !loadingKline" class="absolute inset-0 flex items-center justify-center text-gray-600 text-sm pointer-events-none">
-              点击左侧行情行查看 K 线
+        <!-- K 线工具栏 -->
+        <div class="flex items-center justify-between border-t border-white/5 pt-3">
+          <span class="text-xs font-semibold tracking-widest text-cyan-400">日 K 线（前复权）</span>
+          <el-radio-group v-model="klineLimit" size="small" @change="loadKline">
+            <el-radio-button :value="60">60 日</el-radio-button>
+            <el-radio-button :value="120">120 日</el-radio-button>
+            <el-radio-button :value="250">1 年</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <!-- K 线区域 -->
+        <div class="relative w-full" style="height:65vh">
+          <div ref="klineRef" class="absolute inset-0"></div>
+          <div v-if="loadingKline" class="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div class="text-cyan-400 text-xs tracking-widest font-mono flex items-center gap-2">
+              <el-icon class="animate-spin"><Loading /></el-icon> K 线加载中...
             </div>
           </div>
         </div>
       </div>
-    </main>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import {
-  TrendCharts, DataLine, DataAnalysis, Refresh, Loading
+  TrendCharts, DataLine, DataAnalysis, Refresh, Loading, Search
 } from '@element-plus/icons-vue'
 import request from '../utils/request'
 
@@ -150,6 +181,20 @@ const selected = ref(null)
 const klineLimit = ref(120)
 const loadingQuotes = ref(false)
 const loadingKline = ref(false)
+const search = ref('')
+const dialogVisible = ref(false)
+// 缓存最近一次拉取到的 K 线数据，dialog 打开时 onOpened 钩子触发渲染
+let pendingKlinePoints = null
+
+const filteredQuotes = computed(() => {
+  const kw = search.value.trim().toLowerCase()
+  if (!kw) return quotes.value
+  return quotes.value.filter(q => {
+    return (q.stockCode && q.stockCode.toLowerCase().includes(kw))
+        || (q.stockName && q.stockName.toLowerCase().includes(kw))
+        || (q.industryName && q.industryName.toLowerCase().includes(kw))
+  })
+})
 
 const klineRef = ref(null)
 let klineChart = null
@@ -167,28 +212,29 @@ const formatPercent = (v) => {
   if (Number.isNaN(n)) return '--'
   return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'
 }
+const formatAmount = (v) => {
+  if (v === null || v === undefined || v === '') return '--'
+  const n = Number(v)
+  if (Number.isNaN(n)) return '--'
+  if (n >= 1e8) return (n / 1e8).toFixed(2) + ' 亿'
+  if (n >= 1e4) return (n / 1e4).toFixed(2) + ' 万'
+  return n.toFixed(0)
+}
 const priceColor = (row) => {
   const v = Number(row?.changePercent)
   if (Number.isNaN(v) || v === 0) return 'text-gray-300'
   return v > 0 ? 'text-red-400 font-mono font-semibold' : 'text-green-400 font-mono font-semibold'
 }
-const rowClass = ({ row }) => {
-  return selected.value && selected.value.stockCode === row.stockCode ? 'is-selected-row' : ''
-}
-
 const loadQuotes = async () => {
   loadingQuotes.value = true
   try {
     const res = await request.get('/stock/quotes')
     if (res.code === 200) {
       quotes.value = res.data || []
-      // 若当前选中股票在列表内，刷新选中数据
+      // 若 dialog 打开中，同步刷新选中股票的最新行情数据
       if (selected.value) {
         const fresh = quotes.value.find(q => q.stockCode === selected.value.stockCode)
         if (fresh) selected.value = fresh
-      } else if (quotes.value.length > 0) {
-        // 默认选中第一只并加载 K 线
-        await handleSelect(quotes.value[0])
       }
     }
   } catch (e) {
@@ -201,7 +247,25 @@ const loadQuotes = async () => {
 const handleSelect = async (row) => {
   if (!row || !row.stockCode) return
   selected.value = row
+  // 重置周期为默认值
+  klineLimit.value = 120
+  dialogVisible.value = true
   await loadKline()
+}
+
+const onDialogOpened = () => {
+  // dialog 打开后 DOM 才挂载，此时再渲染 ECharts
+  if (pendingKlinePoints) {
+    renderKline(pendingKlinePoints)
+    pendingKlinePoints = null
+  }
+}
+
+const onDialogClosed = () => {
+  if (klineChart) {
+    klineChart.dispose()
+    klineChart = null
+  }
 }
 
 const loadKline = async () => {
@@ -212,7 +276,13 @@ const loadKline = async () => {
       params: { limit: klineLimit.value }
     })
     if (res.code === 200) {
-      renderKline(res.data || [])
+      const points = res.data || []
+      // dialog 还没真正打开（DOM 未渲染），先暂存，等 onOpened 钩子时再渲染
+      if (klineRef.value) {
+        renderKline(points)
+      } else {
+        pendingKlinePoints = points
+      }
     }
   } catch (e) {
     console.error(e)
@@ -253,9 +323,37 @@ const renderKline = (points) => {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' },
-      backgroundColor: 'rgba(20,20,25,0.9)',
+      backgroundColor: 'rgba(20,20,25,0.92)',
       borderColor: '#2c2c33',
-      textStyle: { color: '#e5e7eb' }
+      textStyle: { color: '#e5e7eb', fontSize: 12 },
+      formatter: (params) => {
+        if (!params || params.length === 0) return ''
+        const date = params[0].axisValueLabel || params[0].name
+        let html = `<div style="font-weight:600;margin-bottom:6px;color:#fff">${date}</div>`
+        for (const p of params) {
+          if (p.seriesType === 'candlestick') {
+            // candlestick 在 axis tooltip 时 data 格式为 [index, open, close, low, high]
+            const o = p.data[1]
+            const c = p.data[2]
+            const l = p.data[3]
+            const h = p.data[4]
+            const up = Number(c) >= Number(o)
+            const color = up ? '#ef4444' : '#22c55e'
+            html += `<div style="display:flex;align-items:center;gap:6px;margin:2px 0">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color}"></span>
+              <span>日K</span>
+            </div>`
+            html += `<div style="margin-left:14px">开盘 <b>${o}</b></div>`
+            html += `<div style="margin-left:14px">收盘 <b style="color:${color}">${c}</b></div>`
+            html += `<div style="margin-left:14px">最低 <b>${l}</b></div>`
+            html += `<div style="margin-left:14px">最高 <b>${h}</b></div>`
+          } else {
+            const val = (p.value === '-' || p.value === undefined || p.value === null) ? '--' : p.value
+            html += `<div style="margin:2px 0">${p.marker}${p.seriesName} <b>${val}</b></div>`
+          }
+        }
+        return html
+      }
     },
     legend: {
       data: ['日K', 'MA5', 'MA20'],
@@ -358,13 +456,58 @@ onBeforeUnmount(() => {
   --el-table-header-text-color: #9ca3af;
 }
 :deep(.market-table .el-table__row) { cursor: pointer; }
-:deep(.market-table .is-selected-row > td) {
-  background: linear-gradient(90deg, rgba(59,130,246,0.18), rgba(59,130,246,0.04)) !important;
-}
 :deep(.market-table th.el-table__cell) {
   background: rgba(24,24,27,0.4) !important;
   border-bottom: 1px solid rgba(255,255,255,0.05) !important;
   font-size: 12px;
   letter-spacing: 1px;
+}
+
+/* 弹窗内统计单元 */
+.stat-cell {
+  background: rgba(11, 14, 22, 0.65);
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.75rem;
+}
+.stat-label {
+  font-size: 11px;
+  color: #6b7280;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.stat-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 14px;
+  color: #e5e7eb;
+  font-weight: 600;
+}
+
+/* K 线 Dialog 主题适配（背景比列表卡片更亮 + 蓝调辉光，避免与列表混淆） */
+:deep(.kline-dialog) {
+  --el-dialog-bg-color: #161a26;
+  background: linear-gradient(160deg, #1b2030 0%, #161a26 60%, #11141d 100%) !important;
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  border-radius: 1rem;
+  box-shadow:
+    0 0 0 1px rgba(96, 165, 250, 0.08),
+    0 30px 60px -20px rgba(0, 0, 0, 0.8),
+    0 0 80px -10px rgba(59, 130, 246, 0.25);
+  overflow: hidden;
+}
+:deep(.kline-dialog .el-dialog__header) {
+  border-bottom: 1px solid rgba(96, 165, 250, 0.15);
+  background: linear-gradient(90deg, rgba(59,130,246,0.08), transparent);
+  margin-right: 0;
+  padding: 16px 20px;
+}
+:deep(.kline-dialog .el-dialog__body) {
+  padding: 18px 20px 22px;
+  color: #d1d5db;
+  background: transparent;
+}
+:deep(.kline-dialog .el-dialog__headerbtn .el-dialog__close) {
+  color: #9ca3af;
+  font-size: 18px;
 }
 </style>
