@@ -53,3 +53,18 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+
+# SmartTrade 业务参数
+smarttrade:
+  # 股票池大小（启动时若 zidatrade_stock_info 为空，自动从东方财富拉取这么多支）
+  stock-pool-size: 100
+  # 日线行情同步参数
+  daily-price:
+    # 每只股票同步的最近 K 线根数
+    sync-limit: 250
+    # 应用启动时，若 zidatrade_stock_daily_price 为空则自动跑一次同步
+    cold-start: true
+    # 单只股票之间的请求间隔(毫秒)，避免给数据源造成压力
+    request-interval-ms: 120
+    # 每个交易日 16:30 收盘后同步（cron 6 位：秒 分 时 日 月 周）
+    cron: "0 30 16 * * MON-FRI"

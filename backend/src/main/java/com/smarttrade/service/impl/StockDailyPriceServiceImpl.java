@@ -34,19 +34,13 @@ public class StockDailyPriceServiceImpl extends ServiceImpl<StockDailyPriceMappe
         if (list == null || list.isEmpty()) {
             return;
         }
-        for (StockDailyPrice item : list) {
-            StockDailyPrice exists = this.getOne(
-                    new LambdaQueryWrapper<StockDailyPrice>()
-                            .eq(StockDailyPrice::getStockCode, item.getStockCode())
-                            .eq(StockDailyPrice::getTradeDate, item.getTradeDate()),
-                    false
-            );
-            if (exists == null) {
-                this.save(item);
-            } else {
-                item.setId(exists.getId());
-                this.updateById(item);
-            }
+        // 使用 MySQL 原生 INSERT ... ON DUPLICATE KEY UPDATE 一次写入整批，
+        // 替代逐行 select + insert，避免 N+1 与海量 SQL 日志。
+        // 防御：一次 SQL 不要太大，按 500 行分块。
+        final int chunk = 500;
+        for (int i = 0; i < list.size(); i += chunk) {
+            int to = Math.min(i + chunk, list.size());
+            this.baseMapper.upsertBatch(list.subList(i, to));
         }
     }
 }
