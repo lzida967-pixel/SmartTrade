@@ -1,6 +1,8 @@
 com\smarttrade\dto\LoginDTO.class
+com\smarttrade\mapper\StockInfoMapper.class
 com\smarttrade\common\Result.class
 com\smarttrade\controller\SystemTestController.class
+com\smarttrade\service\StockInfoService.class
 com\smarttrade\utils\UserContext.class
 com\smarttrade\service\impl\UserServiceImpl.class
 com\smarttrade\utils\JwtUtils.class
@@ -10,7 +12,11 @@ com\smarttrade\entity\User.class
 com\smarttrade\config\JwtInterceptor.class
 com\smarttrade\controller\UserController.class
 com\smarttrade\dto\RegisterDTO.class
+com\smarttrade\service\impl\StockInfoServiceImpl.class
 com\smarttrade\mapper\UserMapper.class
+com\smarttrade\dto\UpdateProfileDTO.class
 com\smarttrade\config\WebMvcConfig.class
 com\smarttrade\config\MyBatisPlusConfig.class
 com\smarttrade\SmartTradeApplication.class
+com\smarttrade\entity\StockInfo.class
+com\smarttrade\controller\StockInfoController.class

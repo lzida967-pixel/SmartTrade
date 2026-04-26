@@ -42,6 +42,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new RuntimeException("账号或密码错误");
         }
 
+        user.setLastLoginAt(LocalDateTime.now());
+        this.getBaseMapper().updateById(user);
+
         // 生成并返回 token
         return jwtUtils.generateToken(user.getId(), user.getUsername());
     }
@@ -66,6 +69,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             : "Trader_" + (System.currentTimeMillis() % 10000));
             
         // 赋予 100 万 初始模拟资金
+        newUser.setRiskLevel("BALANCED");
         newUser.setTotalAssets(new BigDecimal("1000000.00"));
         newUser.setAvailableFunds(new BigDecimal("1000000.00"));
         newUser.setFrozenFunds(BigDecimal.ZERO);

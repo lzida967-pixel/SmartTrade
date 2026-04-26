@@ -8,9 +8,15 @@ D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\SystemT
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\UserService.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\UserMapper.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\SmartTradeApplication.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\StockInfoController.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\entity\StockInfo.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\StockInfoService.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\dto\UpdateProfileDTO.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\common\GlobalExceptionHandler.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\UserController.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\MyBatisPlusConfig.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\impl\UserServiceImpl.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\utils\UserContext.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\entity\User.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\impl\StockInfoServiceImpl.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\StockInfoMapper.java
