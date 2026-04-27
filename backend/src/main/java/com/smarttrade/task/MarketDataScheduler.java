@@ -1,5 +1,6 @@
 package com.smarttrade.task;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.smarttrade.entity.StockDailyPrice;
 import com.smarttrade.entity.StockInfo;
 import com.smarttrade.service.StockDailyPriceService;
@@ -13,11 +14,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 行情数据补充任务
@@ -72,36 +75,62 @@ public class MarketDataScheduler {
     }
 
     /**
-     * 应用启动后，若日线表为空则跑一次（避免空 DB 时无任何历史数据）
+     * 应用启动后异步同步缺失的股票数据：
+     *   - 表为空 → 全量同步股票池
+     *   - 否则 → 只同步 stock_info 中存在但 stock_daily_price 没有任何记录的股票（差集补齐）
      */
     @PostConstruct
     public void initOnBoot() {
         if (!coldStart) return;
-        try {
-            long count = stockDailyPriceService.count();
-            if (count > 0) {
-                log.info("zidatrade_stock_daily_price 已有 {} 行记录，跳过冷启动同步", count);
-                return;
-            }
-            // 异步执行避免阻塞应用启动
-            new Thread(() -> {
-                try {
-                    Thread.sleep(3000); // 等待应用完全 Ready
-                    log.info("[冷启动] 日线表为空，开始首次同步...");
+        new Thread(() -> {
+            try {
+                Thread.sleep(3000); // 等待应用完全 Ready
+                long count = stockDailyPriceService.count();
+                if (count == 0) {
+                    log.info("[冷启动] 日线表为空，开始全量同步...");
                     int success = syncAllStocks();
-                    log.info("[冷启动] 首次同步完成: 成功 {} 支", success);
-                } catch (Exception e) {
-                    log.error("冷启动同步失败", e);
+                    log.info("[冷启动] 全量同步完成: 成功 {} 支", success);
+                } else {
+                    int filled = syncMissingStocks();
+                    if (filled > 0) {
+                        log.info("[冷启动] 缺数据股票补齐完成: 新增 {} 支日线数据", filled);
+                    } else {
+                        log.info("[冷启动] 股票池日线数据完整，无需补齐");
+                    }
                 }
-            }, "daily-price-coldstart").start();
-        } catch (Exception e) {
-            log.warn("检查日线表行数失败: {}", e.getMessage());
-        }
+            } catch (Exception e) {
+                log.error("冷启动同步失败", e);
+            }
+        }, "daily-price-coldstart").start();
     }
 
     /**
-     * 拉取所有股票池股票的日 K 并入库。
-     * 返回成功同步的股票数。
+     * 同步所有 stock_info 中存在但 stock_daily_price 表里没有任何记录的股票
+     */
+    public int syncMissingStocks() {
+        List<StockInfo> stocks = stockInfoService.list();
+        if (stocks == null || stocks.isEmpty()) return 0;
+
+        // 一次查出 daily_price 表里已有的所有 stock_code（去重）
+        List<Object> existed = stockDailyPriceService.listObjs(
+                new QueryWrapper<StockDailyPrice>().select("DISTINCT stock_code")
+        );
+        Set<String> existSet = existed.stream()
+                .map(String::valueOf)
+                .collect(Collectors.toCollection(HashSet::new));
+
+        List<StockInfo> missing = stocks.stream()
+                .filter(s -> !existSet.contains(s.getStockCode()))
+                .toList();
+        if (missing.isEmpty()) return 0;
+
+        log.info("[补齐] 检测到 {} 支股票缺少日线数据: {}", missing.size(),
+                missing.stream().map(StockInfo::getStockCode).limit(20).toList());
+        return syncStockList(missing);
+    }
+
+    /**
+     * 拉取所有股票池股票的日 K 并入库
      */
     public int syncAllStocks() {
         List<StockInfo> stocks = stockInfoService.list();
@@ -109,6 +138,13 @@ public class MarketDataScheduler {
             log.warn("股票池为空，无法同步日线行情");
             return 0;
         }
+        return syncStockList(stocks);
+    }
+
+    /**
+     * 同步给定股票列表的日 K 数据
+     */
+    private int syncStockList(List<StockInfo> stocks) {
         int total = stocks.size();
         int success = 0;
         int idx = 0;

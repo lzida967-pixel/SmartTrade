@@ -117,16 +117,20 @@
       @closed="onDialogClosed"
     >
       <template #header>
-        <div class="flex items-center justify-between pr-8">
+        <div class="flex items-center justify-between pr-8 gap-3 flex-wrap">
           <div class="flex items-center gap-3">
             <el-icon class="text-cyan-400"><DataAnalysis /></el-icon>
             <span class="text-base text-gray-100 font-bold">{{ selected?.stockName || '--' }}</span>
             <span class="text-gray-500 text-xs font-mono">{{ selected?.stockCode }}</span>
             <span class="text-gray-500 text-xs">{{ selected?.industryName || selected?.plateType || '' }}</span>
           </div>
-          <div v-if="selected" :class="priceColor(selected)" class="font-mono text-base mr-3">
-            {{ formatNum(selected.latestPrice) }}
-            <span class="text-xs ml-1">{{ formatPercent(selected.changePercent) }}</span>
+          <div class="flex items-center gap-3">
+            <div v-if="selected" :class="priceColor(selected)" class="font-mono text-base">
+              {{ formatNum(selected.latestPrice) }}
+              <span class="text-xs ml-1">{{ formatPercent(selected.changePercent) }}</span>
+            </div>
+            <el-button size="small" type="danger" @click.stop="openOrder('BUY')">买入</el-button>
+            <el-button size="small" type="success" @click.stop="openOrder('SELL')">卖出</el-button>
           </div>
         </div>
       </template>
@@ -164,17 +168,35 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 下单弹窗 -->
+    <OrderDialog
+      v-model="orderDialogVisible"
+      :stock-code="selected?.stockCode || ''"
+      :stock-name="selected?.stockName || ''"
+      :latest-price="selected?.latestPrice || 0"
+      :change-percent="selected?.changePercent || 0"
+      :default-direction="orderDirection"
+      :available-funds="availableFunds"
+      :available-qty="availableQty"
+      @placed="onOrderPlaced"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import {
   TrendCharts, DataLine, DataAnalysis, Refresh, Loading, Search
 } from '@element-plus/icons-vue'
 import request from '../utils/request'
+import OrderDialog from '../components/OrderDialog.vue'
+
+const route = useRoute()
+const router = useRouter()
 
 const quotes = ref([])
 const selected = ref(null)
@@ -185,6 +207,36 @@ const search = ref('')
 const dialogVisible = ref(false)
 // 缓存最近一次拉取到的 K 线数据，dialog 打开时 onOpened 钩子触发渲染
 let pendingKlinePoints = null
+
+// 下单弹窗相关状态
+const orderDialogVisible = ref(false)
+const orderDirection = ref('BUY')
+const availableFunds = ref(0)
+const availableQty = ref(0)
+
+const openOrder = async (direction) => {
+  orderDirection.value = direction
+  // 拉取用户资产 + 该股可卖持仓
+  try {
+    const [assetRes, posRes] = await Promise.all([
+      request.get('/user/asset'),
+      request.get('/trade/positions')
+    ])
+    if (assetRes.code === 200) {
+      availableFunds.value = Number(assetRes.data?.availableFunds || 0)
+    }
+    if (posRes.code === 200) {
+      const pos = (posRes.data || []).find(p => p.stockCode === selected.value?.stockCode)
+      availableQty.value = pos ? (pos.availableQuantity || 0) : 0
+    }
+  } catch (e) { /* ignore */ }
+  orderDialogVisible.value = true
+}
+
+const onOrderPlaced = () => {
+  // 下单成功后刷新一次行情，使弹窗内的最新价/涨跌幅更新
+  loadQuotes()
+}
 
 const filteredQuotes = computed(() => {
   const kw = search.value.trim().toLowerCase()
@@ -416,11 +468,41 @@ const handleResize = () => {
   klineChart && klineChart.resize()
 }
 
+/**
+ * 跳转或刷新进入本页时，若 URL 带 ?stockCode=xxx 则自动打开该股 K 线
+ */
+const openByQueryCode = async (code) => {
+  if (!code) return
+  let row = quotes.value.find(q => q.stockCode === code)
+  if (!row) {
+    if (!quotes.value.length) {
+      await loadQuotes()
+    }
+    row = quotes.value.find(q => q.stockCode === code)
+  }
+  if (row) {
+    await handleSelect(row)
+  } else {
+    ElMessage.warning(`未在股票池中找到 ${code}`)
+  }
+  // 清掉 query 避免再次触发或刷新时重弹
+  router.replace({ path: '/market', query: {} })
+}
+
 onMounted(async () => {
   await loadQuotes()
   // 30 秒自动刷新
   timer = setInterval(loadQuotes, 30000)
   window.addEventListener('resize', handleResize)
+  // 处理 ?stockCode=xxx 参数
+  if (route.query.stockCode) {
+    await openByQueryCode(String(route.query.stockCode))
+  }
+})
+
+// 已挂载状态下二次跳转（持仓 → 行情 → 委托单 → 行情）也要响应
+watch(() => route.query.stockCode, (code) => {
+  if (code) openByQueryCode(String(code))
 })
 
 onBeforeUnmount(() => {

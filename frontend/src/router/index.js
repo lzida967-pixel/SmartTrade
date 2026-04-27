@@ -20,10 +20,37 @@ const routes = [
     component: () => import('../views/Market.vue')
   },
   {
+    path: '/orders',
+    name: 'Orders',
+    component: () => import('../views/Orders.vue')
+  },
+  {
+    path: '/positions',
+    name: 'Positions',
+    component: () => import('../views/Positions.vue')
+  },
+  {
     path: '/admin',
-    name: 'SystemAdmin',
     component: () => import('../views/SystemAdmin.vue'),
-    meta: { requireAdmin: true, hideLayout: true }
+    meta: { requireAdmin: true, hideLayout: true },
+    children: [
+      { path: '', redirect: '/admin/users' },
+      {
+        path: 'users',
+        name: 'AdminUsers',
+        component: () => import('../views/admin/AdminUsers.vue')
+      },
+      {
+        path: 'stocks',
+        name: 'AdminStocks',
+        component: () => import('../views/admin/AdminStocks.vue')
+      },
+      {
+        path: 'orders',
+        name: 'AdminOrders',
+        component: () => import('../views/admin/AdminOrders.vue')
+      }
+    ]
   }
 ]
 

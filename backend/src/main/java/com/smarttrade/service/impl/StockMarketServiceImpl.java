@@ -8,14 +8,24 @@ import com.smarttrade.vo.KlinePointVO;
 import com.smarttrade.vo.StockQuoteVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 东方财富免费行情接口实现
@@ -82,28 +92,173 @@ public class StockMarketServiceImpl implements StockMarketService {
     @Autowired
     private RestTemplate restTemplate;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    /**
+     * 行情数据 Redis 缓存配置
+     *   - 实时行情 30s：A 股最小 tick 不会比这更新得快，30s 命中率高且数据新鲜度可接受
+     *   - 日 K 5min：日 K 一天才更新，盘中 5 分钟刷新一次足够
+     */
+    private static final Duration QUOTE_CACHE_TTL = Duration.ofSeconds(30);
+    private static final Duration KLINE_CACHE_TTL = Duration.ofMinutes(5);
+
+    private static final String KEY_QUOTE_SINGLE = "stock:quote:";   // + code
+    private static final String KEY_QUOTE_BATCH  = "stock:batch:";   // + md5(sortedCodes)
+    private static final String KEY_KLINE        = "stock:kline:";   // + code:limit
+
+    /**
+     * 东财批量行情接口的简易熔断：失败时设置为"下次允许重试时刻"。
+     * 在此之前，batchFetchQuoteForStocks 会跳过东财直接走新浪兜底，
+     * 避免每个请求都浪费 4 次重试（用户感受慢 1~2 秒）。
+     */
+    private static final long EASTMONEY_COOLDOWN_MS = 60_000L;
+    private volatile long eastmoneyResumeAt = 0L;
+
     @Override
     public StockQuoteVO fetchRealtimeQuote(String stockCode, String market) {
+        // 0. 先查 Redis 缓存
+        String cacheKey = KEY_QUOTE_SINGLE + stockCode;
+        StockQuoteVO cached = cacheGet(cacheKey, StockQuoteVO.class);
+        if (cached != null) return cached;
+
+        // 1. 优先东方财富，偶发抖动重试 1 次
+        StockQuoteVO vo = fetchRealtimeQuoteFromEastmoney(stockCode, market);
+        if (vo != null && vo.getLatestPrice() != null
+                && vo.getLatestPrice().compareTo(BigDecimal.ZERO) > 0) {
+            cacheSet(cacheKey, vo, QUOTE_CACHE_TTL);
+            return vo;
+        }
+        // 2. 兜底新浪财经
+        StockQuoteVO sinaVo = fetchRealtimeQuoteFromSina(stockCode, market);
+        if (sinaVo != null) {
+            log.info("[实时行情兜底] 股票 {} 使用新浪行情: latestPrice={}", stockCode, sinaVo.getLatestPrice());
+            cacheSet(cacheKey, sinaVo, QUOTE_CACHE_TTL);
+            return sinaVo;
+        }
+        return null;
+    }
+
+    /**
+     * 东方财富实时行情（主源），含 1 次重试
+     */
+    private StockQuoteVO fetchRealtimeQuoteFromEastmoney(String stockCode, String market) {
         String secid = buildSecid(stockCode, market);
         if (secid == null) {
             return null;
         }
+        Exception lastEx = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                String url = String.format(QUOTE_URL, secid);
+                String body = restTemplate.getForObject(url, String.class);
+                if (body == null || body.isEmpty()) {
+                    return null;
+                }
+                JsonNode root = MAPPER.readTree(body);
+                JsonNode data = root.path("data");
+                if (data.isMissingNode() || data.isNull()) {
+                    return null;
+                }
+                return parseQuote(stockCode, market, data);
+            } catch (Exception e) {
+                lastEx = e;
+                if (attempt < 2) {
+                    try { Thread.sleep(150); } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+        log.warn("东方财富实时行情失败 {}(已重试): {}", stockCode,
+                lastEx == null ? "unknown" : lastEx.getMessage());
+        return null;
+    }
+
+    /**
+     * 新浪财经实时行情（兜底）
+     *
+     * URL: https://hq.sinajs.cn/list=sh600519
+     * 返回示例: var hq_str_sh600519="贵州茅台,1685.000,1690.000,1685.500,1700.000,1660.500,...";
+     * 字段: 0=名称, 1=今开, 2=昨收, 3=当前价, 4=最高, 5=最低, 6=买一, 7=卖一,
+     *       8=成交量(股), 9=成交额(元), ..., 30=日期, 31=时间
+     *
+     * 注意：必须带 Referer=https://finance.sina.com.cn/，否则返回空
+     */
+    private static final Pattern SINA_QUOTE_PATTERN =
+            Pattern.compile("hq_str_[a-z]+\\d+=\"([^\"]+)\"");
+
+    private StockQuoteVO fetchRealtimeQuoteFromSina(String stockCode, String market) {
+        String prefix = sinaPrefix(stockCode, market);
+        if (prefix == null) return null;
         try {
-            String url = String.format(QUOTE_URL, secid);
-            String body = restTemplate.getForObject(url, String.class);
-            if (body == null || body.isEmpty()) {
+            String url = "https://hq.sinajs.cn/list=" + prefix + stockCode;
+            HttpHeaders headers = new HttpHeaders();
+            headers.set(HttpHeaders.REFERER, "https://finance.sina.com.cn/");
+            ResponseEntity<String> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            String body = resp.getBody();
+            if (body == null || body.isEmpty()) return null;
+            Matcher m = SINA_QUOTE_PATTERN.matcher(body);
+            if (!m.find()) return null;
+            String[] fields = m.group(1).split(",");
+            if (fields.length < 6) return null;
+
+            BigDecimal openPrice = toBigDecimal(fields[1]);
+            BigDecimal preClose = toBigDecimal(fields[2]);
+            BigDecimal latest = toBigDecimal(fields[3]);
+            BigDecimal high = toBigDecimal(fields[4]);
+            BigDecimal low = toBigDecimal(fields[5]);
+
+            if (latest == null || latest.compareTo(BigDecimal.ZERO) <= 0) {
                 return null;
             }
-            JsonNode root = MAPPER.readTree(body);
-            JsonNode data = root.path("data");
-            if (data.isMissingNode() || data.isNull()) {
-                return null;
+
+            StockQuoteVO vo = new StockQuoteVO();
+            vo.setStockCode(stockCode);
+            vo.setMarket(market);
+            vo.setLatestPrice(latest);
+            vo.setOpenPrice(openPrice);
+            vo.setPreClosePrice(preClose);
+            vo.setHighPrice(high);
+            vo.setLowPrice(low);
+            // 涨跌额 / 涨跌幅
+            if (preClose != null && preClose.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal changeAmount = latest.subtract(preClose).setScale(3, RoundingMode.HALF_UP);
+                BigDecimal changePct = changeAmount.multiply(BigDecimal.valueOf(100))
+                        .divide(preClose, 4, RoundingMode.HALF_UP);
+                vo.setChangeAmount(changeAmount);
+                vo.setChangePercent(changePct);
             }
-            return parseQuote(stockCode, market, data);
+            // 成交量、成交额
+            if (fields.length > 9) {
+                try { vo.setVolume(Long.parseLong(fields[8].trim())); } catch (Exception ignored) {}
+                vo.setTurnoverAmount(toBigDecimal(fields[9]));
+            }
+            return vo;
         } catch (Exception e) {
-            log.warn("拉取股票 {} 实时行情失败: {}", stockCode, e.getMessage());
+            log.warn("新浪实时行情失败 {}: {}", stockCode, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 根据股票代码 + market 字段推断新浪 prefix
+     */
+    private String sinaPrefix(String stockCode, String market) {
+        if (market != null) {
+            String mk = market.trim().toUpperCase();
+            if ("SH".equals(mk)) return "sh";
+            if ("SZ".equals(mk)) return "sz";
+            if ("BJ".equals(mk)) return "bj";
+        }
+        if (stockCode == null || stockCode.isEmpty()) return null;
+        char c = stockCode.charAt(0);
+        if (c == '6' || c == '5' || c == '9') return "sh";
+        if (c == '0' || c == '3' || c == '2') return "sz";
+        if (c == '4' || c == '8') return "bj";
+        return null;
     }
 
     @Override
@@ -129,6 +284,10 @@ public class StockMarketServiceImpl implements StockMarketService {
         if (limit <= 0) {
             limit = 120;
         }
+        // 0. 先查 Redis 缓存
+        String klineCacheKey = KEY_KLINE + stockCode + ":" + limit;
+        List<KlinePointVO> cachedKline = cacheGetList(klineCacheKey, KlinePointVO.class);
+        if (cachedKline != null) return cachedKline;
         // 主源：东方财富
         try {
             String url = String.format(KLINE_URL, secid, limit);
@@ -154,6 +313,7 @@ public class StockMarketServiceImpl implements StockMarketService {
                         vo.setTurnoverRate(toBigDecimal(arr[10]));
                         list.add(vo);
                     }
+                    cacheSetList(klineCacheKey, list, KLINE_CACHE_TTL);
                     return list;
                 }
             }
@@ -161,7 +321,11 @@ public class StockMarketServiceImpl implements StockMarketService {
             log.warn("东方财富 K 线失败({}): {}，降级到新浪", stockCode, e.getMessage());
         }
         // 兜底：新浪财经
-        return fetchDailyKlineFromSina(stockCode, market, limit);
+        List<KlinePointVO> sinaList = fetchDailyKlineFromSina(stockCode, market, limit);
+        if (sinaList != null && !sinaList.isEmpty()) {
+            cacheSetList(klineCacheKey, sinaList, KLINE_CACHE_TTL);
+        }
+        return sinaList;
     }
 
     /**
@@ -218,6 +382,11 @@ public class StockMarketServiceImpl implements StockMarketService {
         if (stocks == null || stocks.isEmpty()) {
             return Collections.emptyList();
         }
+        // 0. 先查批量缓存：key = md5(sortedCodes)，TTL 30s
+        String cacheKey = KEY_QUOTE_BATCH + md5OfStockCodes(stocks);
+        List<StockQuoteVO> cached = cacheGetList(cacheKey, StockQuoteVO.class);
+        if (cached != null) return cached;
+
         StringBuilder sb = new StringBuilder();
         for (StockInfo info : stocks) {
             String secid = buildSecid(info.getStockCode(), info.getMarket());
@@ -228,15 +397,61 @@ public class StockMarketServiceImpl implements StockMarketService {
         if (sb.length() == 0) {
             return Collections.emptyList();
         }
-        try {
-            String url = String.format(ULIST_URL, sb.toString());
-            String body = restTemplate.getForObject(url, String.class);
-            if (body == null || body.isEmpty()) {
-                return Collections.emptyList();
+        // 熔断：东财近期失败过 → 在冷却时间内直接走新浪，避免每次都浪费 4 次重试
+        long now = System.currentTimeMillis();
+        if (now < eastmoneyResumeAt) {
+            log.debug("东财处于熔断冷却期（剩余 {}ms），直接走新浪行情", eastmoneyResumeAt - now);
+            List<StockQuoteVO> sinaResult = fetchBatchRealtimeQuotesFromSina(stocks);
+            if (sinaResult != null && !sinaResult.isEmpty()) {
+                cacheSetList(cacheKey, sinaResult, QUOTE_CACHE_TTL);
+                return sinaResult;
             }
+            return buildFallbackList(stocks);
+        }
+
+        // 重试 2 次：东财 push2 偶发 keep-alive 抖动，瞬态网络错误下重试一次基本就能成功
+        String url = String.format(ULIST_URL, sb.toString());
+        String body = null;
+        Exception lastErr = null;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                body = restTemplate.getForObject(url, String.class);
+                if (body != null && !body.isEmpty()) {
+                    lastErr = null;
+                    break;
+                }
+            } catch (Exception e) {
+                lastErr = e;
+                log.warn("批量行情第 {} 次拉取失败: {}", attempt, e.getMessage());
+                if (attempt < 2) {
+                    try { Thread.sleep(200); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                }
+            }
+        }
+        if (body == null || body.isEmpty()) {
+            // 触发熔断：60 秒内不再尝试东财，直接走新浪
+            eastmoneyResumeAt = System.currentTimeMillis() + EASTMONEY_COOLDOWN_MS;
+            if (lastErr != null) {
+                log.warn("东财批量行情失败，进入 {}s 熔断冷却期，切换到新浪行情: {}",
+                        EASTMONEY_COOLDOWN_MS / 1000, lastErr.getMessage());
+            }
+            List<StockQuoteVO> sinaResult = fetchBatchRealtimeQuotesFromSina(stocks);
+            if (sinaResult != null && !sinaResult.isEmpty()) {
+                cacheSetList(cacheKey, sinaResult, QUOTE_CACHE_TTL);
+                return sinaResult;
+            }
+            log.warn("新浪行情也失败，已降级输出基础信息");
+            return buildFallbackList(stocks);
+        }
+        // 东财成功：清除熔断标记
+        if (eastmoneyResumeAt != 0L) {
+            eastmoneyResumeAt = 0L;
+            log.info("东财批量行情恢复正常，解除熔断");
+        }
+        try {
             JsonNode diff = MAPPER.readTree(body).path("data").path("diff");
             if (!diff.isArray()) {
-                return Collections.emptyList();
+                return buildFallbackList(stocks);
             }
             // 用 map 加速根据代码合并
             java.util.Map<String, StockQuoteVO> quoteMap = new java.util.HashMap<>(diff.size() * 2);
@@ -276,11 +491,150 @@ public class StockMarketServiceImpl implements StockMarketService {
                 }
                 result.add(vo);
             }
+            // 写入批量缓存
+            cacheSetList(cacheKey, result, QUOTE_CACHE_TTL);
             return result;
         } catch (Exception e) {
-            log.warn("批量拉取实时行情失败: {}", e.getMessage());
-            return Collections.emptyList();
+            log.warn("批量行情解析失败，已降级输出基础信息: {}", e.getMessage());
+            return buildFallbackList(stocks);
         }
+    }
+
+    /**
+     * 新浪批量行情兜底：当东财 push2 被风控/拒绝服务时启用。
+     *   接口：https://hq.sinajs.cn/list=sh600519,sz000001,...
+     *   返回多行 var hq_str_xxx="...";
+     *   字段索引参见 fetchRealtimeQuoteFromSina。
+     *
+     * 注意：
+     *   - 单次股票数过多会被截断，按 50 支一批分批调用
+     *   - 必须带 Referer，否则返回空
+     *   - 任一批次失败仍返回已成功批次的合并结果（部分降级总比全无）
+     */
+    private List<StockQuoteVO> fetchBatchRealtimeQuotesFromSina(List<StockInfo> stocks) {
+        if (stocks == null || stocks.isEmpty()) return Collections.emptyList();
+        final int batchSize = 50;
+        java.util.Map<String, StockQuoteVO> quoteMap = new java.util.HashMap<>(stocks.size() * 2);
+
+        for (int from = 0; from < stocks.size(); from += batchSize) {
+            int to = Math.min(from + batchSize, stocks.size());
+            List<StockInfo> batch = stocks.subList(from, to);
+
+            // 构造 list= 参数：sh600519,sz000001,...
+            StringBuilder listParam = new StringBuilder();
+            // 同时记录每个 prefix+code 对应的原始 stockInfo
+            java.util.Map<String, StockInfo> keyMap = new java.util.HashMap<>(batch.size() * 2);
+            for (StockInfo info : batch) {
+                String prefix = sinaPrefix(info.getStockCode(), info.getMarket());
+                if (prefix == null) continue;
+                String key = prefix + info.getStockCode();
+                keyMap.put(key, info);
+                if (listParam.length() > 0) listParam.append(',');
+                listParam.append(key);
+            }
+            if (listParam.length() == 0) continue;
+
+            try {
+                String url = "https://hq.sinajs.cn/list=" + listParam;
+                HttpHeaders headers = new HttpHeaders();
+                headers.set(HttpHeaders.REFERER, "https://finance.sina.com.cn/");
+                ResponseEntity<String> resp = restTemplate.exchange(
+                        url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+                String body = resp.getBody();
+                if (body == null || body.isEmpty()) continue;
+
+                // 逐行解析：var hq_str_sh600519="贵州茅台,..."
+                for (String line : body.split("\n")) {
+                    Matcher mLine = Pattern.compile("hq_str_([a-z]+\\d+)=\"([^\"]*)\"").matcher(line);
+                    if (!mLine.find()) continue;
+                    String key = mLine.group(1);
+                    String content = mLine.group(2);
+                    if (content == null || content.isEmpty()) continue;
+                    StockInfo info = keyMap.get(key);
+                    if (info == null) continue;
+                    StockQuoteVO vo = parseSinaQuoteContent(content, info);
+                    if (vo != null) quoteMap.put(info.getStockCode(), vo);
+                }
+            } catch (Exception e) {
+                log.warn("新浪批量行情第 {}-{} 批拉取失败: {}", from, to, e.getMessage());
+            }
+        }
+
+        // 按入参顺序输出，缺失的填基础信息
+        List<StockQuoteVO> result = new ArrayList<>(stocks.size());
+        for (StockInfo info : stocks) {
+            StockQuoteVO vo = quoteMap.get(info.getStockCode());
+            if (vo == null) {
+                vo = new StockQuoteVO();
+                vo.setStockCode(info.getStockCode());
+                vo.setStockName(info.getStockName());
+                vo.setMarket(info.getMarket());
+            }
+            result.add(vo);
+        }
+        return result;
+    }
+
+    /**
+     * 把新浪 hq_str 的 CSV 内容解析为 StockQuoteVO
+     */
+    private StockQuoteVO parseSinaQuoteContent(String content, StockInfo info) {
+        String[] fields = content.split(",");
+        if (fields.length < 6) return null;
+
+        BigDecimal openPrice = toBigDecimal(fields[1]);
+        BigDecimal preClose = toBigDecimal(fields[2]);
+        BigDecimal latest = toBigDecimal(fields[3]);
+        BigDecimal high = toBigDecimal(fields[4]);
+        BigDecimal low = toBigDecimal(fields[5]);
+
+        if (latest == null || latest.compareTo(BigDecimal.ZERO) <= 0) {
+            // 价格为 0 通常说明停牌或未开盘，仍返回基础信息以便前端展示
+            StockQuoteVO empty = new StockQuoteVO();
+            empty.setStockCode(info.getStockCode());
+            empty.setStockName(info.getStockName());
+            empty.setMarket(info.getMarket());
+            return empty;
+        }
+
+        StockQuoteVO vo = new StockQuoteVO();
+        vo.setStockCode(info.getStockCode());
+        vo.setStockName(fields[0] != null && !fields[0].isEmpty() ? fields[0] : info.getStockName());
+        vo.setMarket(info.getMarket());
+        vo.setLatestPrice(latest);
+        vo.setOpenPrice(openPrice);
+        vo.setPreClosePrice(preClose);
+        vo.setHighPrice(high);
+        vo.setLowPrice(low);
+
+        if (preClose != null && preClose.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal changeAmount = latest.subtract(preClose).setScale(3, RoundingMode.HALF_UP);
+            BigDecimal changePct = changeAmount.multiply(BigDecimal.valueOf(100))
+                    .divide(preClose, 4, RoundingMode.HALF_UP);
+            vo.setChangeAmount(changeAmount);
+            vo.setChangePercent(changePct);
+        }
+        if (fields.length > 9) {
+            try { vo.setVolume(Long.parseLong(fields[8].trim())); } catch (Exception ignored) {}
+            vo.setTurnoverAmount(toBigDecimal(fields[9]));
+        }
+        return vo;
+    }
+
+    /**
+     * 行情接口异常时的降级输出：仅保留 stock_info 中的代码/名字/市场，价格相关字段为 null。
+     * 这样前端表格不会突然变空，对用户更友好。
+     */
+    private List<StockQuoteVO> buildFallbackList(List<StockInfo> stocks) {
+        List<StockQuoteVO> result = new ArrayList<>(stocks.size());
+        for (StockInfo info : stocks) {
+            StockQuoteVO vo = new StockQuoteVO();
+            vo.setStockCode(info.getStockCode());
+            vo.setStockName(info.getStockName());
+            vo.setMarket(info.getMarket());
+            result.add(vo);
+        }
+        return result;
     }
 
     @Override
@@ -404,6 +758,72 @@ public class StockMarketServiceImpl implements StockMarketService {
             return new BigDecimal(s);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    // ============== Redis 缓存 helper ==============
+
+    private <T> T cacheGet(String key, Class<T> clazz) {
+        try {
+            String json = redisTemplate.opsForValue().get(key);
+            if (json == null || json.isEmpty()) return null;
+            return MAPPER.readValue(json, clazz);
+        } catch (Exception e) {
+            log.debug("读取缓存失败 {}: {}", key, e.getMessage());
+            return null;
+        }
+    }
+
+    private void cacheSet(String key, Object value, Duration ttl) {
+        try {
+            String json = MAPPER.writeValueAsString(value);
+            redisTemplate.opsForValue().set(key, json, ttl);
+        } catch (Exception e) {
+            log.debug("写入缓存失败 {}: {}", key, e.getMessage());
+        }
+    }
+
+    private <T> List<T> cacheGetList(String key, Class<T> clazz) {
+        try {
+            String json = redisTemplate.opsForValue().get(key);
+            if (json == null || json.isEmpty()) return null;
+            return MAPPER.readValue(
+                    json,
+                    MAPPER.getTypeFactory().constructCollectionType(List.class, clazz));
+        } catch (Exception e) {
+            log.debug("读取列表缓存失败 {}: {}", key, e.getMessage());
+            return null;
+        }
+    }
+
+    private void cacheSetList(String key, List<?> value, Duration ttl) {
+        try {
+            String json = MAPPER.writeValueAsString(value);
+            redisTemplate.opsForValue().set(key, json, ttl);
+        } catch (Exception e) {
+            log.debug("写入列表缓存失败 {}: {}", key, e.getMessage());
+        }
+    }
+
+    /**
+     * 把入参股票按 code 排序后做 md5，作为批量缓存 key 后缀。
+     * 避免不同顺序的同一股票集合各占一份缓存。
+     */
+    private String md5OfStockCodes(List<StockInfo> stocks) {
+        List<String> codes = new ArrayList<>(stocks.size());
+        for (StockInfo s : stocks) {
+            if (s != null && s.getStockCode() != null) codes.add(s.getStockCode());
+        }
+        Collections.sort(codes);
+        String joined = String.join(",", codes);
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(joined.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(joined.hashCode());
         }
     }
 

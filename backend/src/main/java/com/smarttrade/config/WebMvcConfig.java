@@ -15,6 +15,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Autowired
     private JwtInterceptor jwtInterceptor;
 
+    @Autowired
+    private AdminInterceptor adminInterceptor;
+
     @Override
     public void addCorsMappings(CorsRegistry registry) {
       registry.addMapping("/**") // 所有接口
@@ -29,6 +32,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         // 放行 登录/注册 和 接口文档 Knife4j 等相关路径
         registry.addInterceptor(jwtInterceptor)
+                .order(1)
                 .addPathPatterns("/**")
                 .excludePathPatterns(
                     "/user/login",
@@ -38,5 +42,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
                     "/v3/api-docs/**",
                     "/swagger-resources/**"
                 );
+
+        // 管理后台权限拦截器：仅 /admin/** 触发，依赖 JwtInterceptor 已写入 UserContext
+        registry.addInterceptor(adminInterceptor)
+                .order(2)
+                .addPathPatterns("/admin/**");
     }
 }

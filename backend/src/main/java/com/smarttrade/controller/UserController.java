@@ -1,13 +1,12 @@
 package com.smarttrade.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.smarttrade.common.Result;
 import com.smarttrade.dto.LoginDTO;
 import com.smarttrade.dto.RegisterDTO;
 import com.smarttrade.dto.UpdateProfileDTO;
 import com.smarttrade.entity.User;
-import com.smarttrade.entity.UserPosition;
-import com.smarttrade.service.UserPositionService;
+import com.smarttrade.entity.UserAssetSnapshot;
+import com.smarttrade.service.AssetService;
 import com.smarttrade.service.UserService;
 import com.smarttrade.utils.UserContext;
 import com.smarttrade.vo.UserAssetVO;
@@ -15,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -26,7 +24,7 @@ public class UserController {
     private UserService userService;
 
     @Autowired
-    private UserPositionService userPositionService;
+    private AssetService assetService;
 
     @PostMapping("/login")
     public Result<String> login(@Validated @RequestBody LoginDTO loginDTO) {    
@@ -70,47 +68,25 @@ public class UserController {
     }
 
     /**
-     * 用户资产聚合：账户资金 + 持仓列表 + 持仓市值
+     * 用户资产聚合：账户资金 + 持仓列表 + 持仓市值（含实时行情计算的市值/浮盈亏）
      */
     @GetMapping("/asset")
     public Result<UserAssetVO> getAsset() {
         Long userId = UserContext.getUserId();
-        User user = userService.getById(userId);
-        if (user == null) {
+        UserAssetVO vo = assetService.buildCurrentAsset(userId);
+        if (vo == null) {
             return Result.error("用户不存在");
         }
-
-        List<UserPosition> positions = userPositionService.list(
-                new LambdaQueryWrapper<UserPosition>()
-                        .eq(UserPosition::getUserId, userId)
-                        .gt(UserPosition::getQuantity, 0)
-        );
-
-        BigDecimal marketValue = BigDecimal.ZERO;
-        BigDecimal floatingProfit = BigDecimal.ZERO;
-        for (UserPosition p : positions) {
-            if (p.getMarketValue() != null) {
-                marketValue = marketValue.add(p.getMarketValue());
-            }
-            if (p.getFloatingProfit() != null) {
-                floatingProfit = floatingProfit.add(p.getFloatingProfit());
-            }
-        }
-
-        UserAssetVO vo = new UserAssetVO();
-        vo.setUserId(user.getId());
-        vo.setUsername(user.getUsername());
-        vo.setNickname(user.getNickname());
-        vo.setAvailableFunds(nullToZero(user.getAvailableFunds()));
-        vo.setFrozenFunds(nullToZero(user.getFrozenFunds()));
-        vo.setMarketValue(marketValue);
-        vo.setFloatingProfit(floatingProfit);
-        vo.setTotalAssets(vo.getAvailableFunds().add(vo.getFrozenFunds()).add(marketValue));
-        vo.setPositions(positions);
         return Result.success(vo);
     }
 
-    private static BigDecimal nullToZero(BigDecimal v) {
-        return v == null ? BigDecimal.ZERO : v;
+    /**
+     * 资产收益曲线：返回最近 days 天的快照点（按日期升序）
+     */
+    @GetMapping("/asset/curve")
+    public Result<List<UserAssetSnapshot>> getAssetCurve(
+            @RequestParam(value = "days", defaultValue = "30") Integer days) {
+        Long userId = UserContext.getUserId();
+        return Result.success(assetService.getCurve(userId, days));
     }
 }

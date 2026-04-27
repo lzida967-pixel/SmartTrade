@@ -27,6 +27,13 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- Apache HttpClient5：带 stale-connection 检测 + 连接池保活，
+             用于稳定调用东方财富 push2 接口（JDK HttpClient 复用陈旧连接会抛 "header parser received no bytes") -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
+
         <!-- Spring Boot Redis -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
