@@ -21,6 +21,7 @@ D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\UserPositio
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\dto\LoginDTO.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\dto\PlaceOrderDTO.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\JwtInterceptor.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\admin\AdminDashboardController.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\StockMarketService.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\TradeDealMapper.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\UserService.java

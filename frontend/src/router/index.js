@@ -34,7 +34,12 @@ const routes = [
     component: () => import('../views/SystemAdmin.vue'),
     meta: { requireAdmin: true, hideLayout: true },
     children: [
-      { path: '', redirect: '/admin/users' },
+      { path: '', redirect: '/admin/dashboard' },
+      {
+        path: 'dashboard',
+        name: 'AdminDashboard',
+        component: () => import('../views/admin/AdminDashboard.vue')
+      },
       {
         path: 'users',
         name: 'AdminUsers',

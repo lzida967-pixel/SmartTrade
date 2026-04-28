@@ -1,14 +1,51 @@
 <template>
   <div>
-    <!-- 顶部 -->
-    <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+    <!-- 页面标题 -->
+    <div class="admin-page-title">
       <div>
-        <div class="text-xs text-gray-500 tracking-widest font-mono">用户 · 管理</div>
-        <div class="text-2xl font-bold text-gray-100 mt-1 flex items-center gap-2">
-          <el-icon class="text-blue-400"><User /></el-icon>用户管理
+        <h2><span class="pt-icon"><el-icon><User /></el-icon></span>用户管理</h2>
+        <div class="pt-sub">账号权限、资金、状态一站式调度</div>
+      </div>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(99,102,241,.15); color:#a5b4fc"><el-icon><User /></el-icon></div>
+        <div>
+          <div class="stat-label">用户总数</div>
+          <div class="stat-value">{{ total }}</div>
         </div>
       </div>
-      <div class="flex items-center gap-3 flex-wrap">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(245,158,11,.12); color:#fbbf24"><el-icon><Setting /></el-icon></div>
+        <div>
+          <div class="stat-label">管理员</div>
+          <div class="stat-value" style="color:#fbbf24">{{ adminCount }}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(16,185,129,.12); color:#34d399"><el-icon><CircleCheck /></el-icon></div>
+        <div>
+          <div class="stat-label">启用中</div>
+          <div class="stat-value" style="color:#34d399">{{ activeCount }}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(59,130,246,.12); color:#60a5fa"><el-icon><Wallet /></el-icon></div>
+        <div>
+          <div class="stat-label">本页可用资金</div>
+          <div class="stat-value" style="color:#60a5fa">¥{{ formatNum(fundsSum) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="admin-toolbar">
+      <div class="flex items-center gap-2 text-xs text-gray-500">
+        <el-icon><Search /></el-icon><span>查找用户</span>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
         <el-input v-model="filters.keyword" placeholder="账号/昵称" clearable
                   class="!w-56" @keyup.enter="reload" @clear="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
@@ -23,7 +60,7 @@
           <el-option label="启用" :value="1" />
           <el-option label="禁用" :value="0" />
         </el-select>
-        <el-button type="primary" plain :loading="loading" @click="reload">
+        <el-button type="primary" :loading="loading" @click="reload">
           <el-icon class="mr-1"><Refresh /></el-icon>刷新
         </el-button>
       </div>
@@ -33,21 +70,36 @@
     <div class="admin-card p-4">
       <el-table :data="users" class="admin-table" v-loading="loading"
                 element-loading-background="rgba(0,0,0,0.4)" empty-text="暂无用户">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="账号" min-width="140" />
-        <el-table-column prop="nickname" label="昵称" min-width="140" />
+        <el-table-column prop="id" label="ID" width="70">
+          <template #default="{ row }">
+            <span class="text-xs text-gray-500 font-mono">#{{ row.id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="用户" min-width="220">
+          <template #default="{ row }">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                {{ (row.nickname || row.username || 'U').charAt(0).toUpperCase() }}
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm text-gray-100 truncate">{{ row.nickname || row.username }}</div>
+                <div class="text-[11px] text-gray-500 font-mono truncate">@{{ row.username }}</div>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.role === 'ADMIN' ? 'warning' : 'info'" size="small" disable-transitions>
+            <span class="dot-tag" :class="row.role === 'ADMIN' ? 'warn' : 'info'">
               {{ row.role || 'USER' }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small" disable-transitions>
+            <span class="dot-tag" :class="row.status === 1 ? 'success' : 'danger'">
               {{ row.status === 1 ? '启用' : '禁用' }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="可用资金" min-width="140" align="right">
@@ -131,9 +183,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { User, Search, Refresh } from '@element-plus/icons-vue'
+import { User, Search, Refresh, Setting, CircleCheck, Wallet } from '@element-plus/icons-vue'
 import request from '../../utils/request'
 
 const users = ref([])
@@ -147,6 +199,12 @@ const fundsDialog = ref(false)
 const editing = ref(null)
 const fundsForm = ref({ action: 'SET', available: 0, frozen: 0 })
 const saving = ref(false)
+
+const adminCount = computed(() => users.value.filter(u => u.role === 'ADMIN').length)
+const activeCount = computed(() => users.value.filter(u => u.status === 1).length)
+const fundsSum = computed(() =>
+  users.value.reduce((acc, u) => acc + Number(u.availableFunds || 0), 0)
+)
 
 const formatNum = (v) => {
   const n = Number(v) || 0

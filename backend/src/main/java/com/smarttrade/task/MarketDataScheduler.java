@@ -20,6 +20,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -63,6 +66,36 @@ public class MarketDataScheduler {
     @Value("${smarttrade.daily-price.request-interval-ms:120}")
     private long requestIntervalMs;
 
+    // ============== 同步进度（线程安全，全局单例状态） ==============
+    private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicReference<String> currentTaskType = new AtomicReference<>(""); // ALL / MISSING / SCHEDULED / COLDSTART
+    private final AtomicReference<String> currentStockCode = new AtomicReference<>("");
+    private final AtomicInteger totalCount = new AtomicInteger(0);
+    private final AtomicInteger processedCount = new AtomicInteger(0);
+    private final AtomicInteger successCount = new AtomicInteger(0);
+    private final AtomicInteger failedCount = new AtomicInteger(0);
+    private final AtomicReference<LocalDateTime> startedAt = new AtomicReference<>();
+    private final AtomicReference<LocalDateTime> finishedAt = new AtomicReference<>();
+    private final AtomicReference<String> lastError = new AtomicReference<>();
+
+    /**
+     * 同步进度快照，前端可轮询展示
+     */
+    public java.util.Map<String, Object> getSyncStatus() {
+        java.util.Map<String, Object> m = new java.util.HashMap<>();
+        m.put("running", running.get());
+        m.put("type", currentTaskType.get());
+        m.put("currentStock", currentStockCode.get());
+        m.put("total", totalCount.get());
+        m.put("processed", processedCount.get());
+        m.put("success", successCount.get());
+        m.put("failed", failedCount.get());
+        m.put("startedAt", startedAt.get());
+        m.put("finishedAt", finishedAt.get());
+        m.put("lastError", lastError.get());
+        return m;
+    }
+
     /**
      * 每个交易日 16:30 同步一次
      */
@@ -70,7 +103,7 @@ public class MarketDataScheduler {
     public void scheduledSync() {
         log.info("[定时] 开始同步股票池日线行情...");
         long start = System.currentTimeMillis();
-        int success = syncAllStocks();
+        int success = syncAllStocks("SCHEDULED");
         log.info("[定时] 同步完成: 成功 {} 支, 耗时 {} ms", success, System.currentTimeMillis() - start);
     }
 
@@ -88,10 +121,10 @@ public class MarketDataScheduler {
                 long count = stockDailyPriceService.count();
                 if (count == 0) {
                     log.info("[冷启动] 日线表为空，开始全量同步...");
-                    int success = syncAllStocks();
+                    int success = syncAllStocks("COLDSTART");
                     log.info("[冷启动] 全量同步完成: 成功 {} 支", success);
                 } else {
-                    int filled = syncMissingStocks();
+                    int filled = syncMissingStocks("COLDSTART");
                     if (filled > 0) {
                         log.info("[冷启动] 缺数据股票补齐完成: 新增 {} 支日线数据", filled);
                     } else {
@@ -104,10 +137,13 @@ public class MarketDataScheduler {
         }, "daily-price-coldstart").start();
     }
 
+    /** 默认走 MISSING 类型（管理后台手动调用） */
+    public int syncMissingStocks() { return syncMissingStocks("MISSING"); }
+
     /**
      * 同步所有 stock_info 中存在但 stock_daily_price 表里没有任何记录的股票
      */
-    public int syncMissingStocks() {
+    public int syncMissingStocks(String taskType) {
         List<StockInfo> stocks = stockInfoService.list();
         if (stocks == null || stocks.isEmpty()) return 0;
 
@@ -126,34 +162,56 @@ public class MarketDataScheduler {
 
         log.info("[补齐] 检测到 {} 支股票缺少日线数据: {}", missing.size(),
                 missing.stream().map(StockInfo::getStockCode).limit(20).toList());
-        return syncStockList(missing);
+        return syncStockList(missing, taskType);
     }
+
+    /** 默认走 ALL 类型（管理后台手动调用） */
+    public int syncAllStocks() { return syncAllStocks("ALL"); }
 
     /**
      * 拉取所有股票池股票的日 K 并入库
      */
-    public int syncAllStocks() {
+    public int syncAllStocks(String taskType) {
         List<StockInfo> stocks = stockInfoService.list();
         if (stocks == null || stocks.isEmpty()) {
             log.warn("股票池为空，无法同步日线行情");
             return 0;
         }
-        return syncStockList(stocks);
+        return syncStockList(stocks, taskType);
     }
 
     /**
-     * 同步给定股票列表的日 K 数据
+     * 同步给定股票列表的日 K 数据，并维护全局进度状态。
+     * 同时只允许一个 syncStockList 在跑，重复触发会立刻返回 0。
      */
-    private int syncStockList(List<StockInfo> stocks) {
+    private int syncStockList(List<StockInfo> stocks, String taskType) {
+        if (!running.compareAndSet(false, true)) {
+            log.warn("[{}] 已有同步任务在执行，本次请求被跳过", taskType);
+            return 0;
+        }
+        // 重置状态
+        currentTaskType.set(taskType);
+        currentStockCode.set("");
+        totalCount.set(stocks.size());
+        processedCount.set(0);
+        successCount.set(0);
+        failedCount.set(0);
+        startedAt.set(LocalDateTime.now());
+        finishedAt.set(null);
+        lastError.set(null);
+
         int total = stocks.size();
-        int success = 0;
         int idx = 0;
+        try {
         for (StockInfo stock : stocks) {
             idx++;
+            currentStockCode.set(stock.getStockCode());
             try {
                 List<KlinePointVO> klines = stockMarketService.fetchDailyKline(
                         stock.getStockCode(), stock.getMarket(), syncLimit);
                 if (klines == null || klines.isEmpty()) {
+                    failedCount.incrementAndGet();
+                    processedCount.incrementAndGet();
                     continue;
                 }
                 List<StockDailyPrice> rows = new ArrayList<>(klines.size());
@@ -185,22 +243,34 @@ public class MarketDataScheduler {
                 }
                 if (!rows.isEmpty()) {
                     stockDailyPriceService.saveOrUpdateBatchByUnique(rows);
-                    success++;
+                    successCount.incrementAndGet();
+                } else {
+                    failedCount.incrementAndGet();
                 }
+                processedCount.incrementAndGet();
                 // 每 20 支输出一次进度，避免刷屏
                 if (idx % 20 == 0 || idx == total) {
-                    log.info("[同步进度] {}/{} 已同步 {} 支", idx, total, success);
+                    log.info("[同步进度] {}/{} 已同步 {} 支", idx, total, successCount.get());
                 }
                 if (requestIntervalMs > 0) {
                     Thread.sleep(requestIntervalMs);
                 }
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
+                lastError.set("被中断");
                 break;
             } catch (Exception e) {
                 log.warn("同步股票 {} 日线失败: {}", stock.getStockCode(), e.getMessage());
+                failedCount.incrementAndGet();
+                processedCount.incrementAndGet();
+                lastError.set(stock.getStockCode() + ": " + e.getMessage());
             }
         }
-        return success;
+        return successCount.get();
+        } finally {
+            finishedAt.set(LocalDateTime.now());
+            currentStockCode.set("");
+            running.set(false);
+        }
     }
 }

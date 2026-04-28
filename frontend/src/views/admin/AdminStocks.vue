@@ -1,78 +1,116 @@
 <template>
   <div>
-    <!-- 顶部 -->
-    <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+    <!-- 页面标题 -->
+    <div class="admin-page-title">
       <div>
-        <div class="text-xs text-gray-500 tracking-widest font-mono">股票池 · 管理</div>
-        <div class="text-2xl font-bold text-gray-100 mt-1 flex items-center gap-2">
-          <el-icon class="text-blue-400"><Coin /></el-icon>股票池管理
-        </div>
+        <h2><span class="pt-icon"><el-icon><Coin /></el-icon></span>股票池管理</h2>
+        <div class="pt-sub">维护交易股票范围与日 K 数据同步</div>
       </div>
-      <div class="flex items-center gap-3 flex-wrap">
-        <el-input v-model="search" placeholder="搜索代码/名称" clearable class="!w-56">
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
+      <div class="flex items-center gap-2 flex-wrap">
         <el-button type="success" plain @click="addDialog = true">
           <el-icon class="mr-1"><Plus /></el-icon>新增股票
         </el-button>
         <el-button type="warning" plain :loading="syncMissing" @click="onSyncMissing">
-          <el-icon class="mr-1"><MagicStick /></el-icon>仅同步缺数据股票
+          <el-icon class="mr-1"><MagicStick /></el-icon>补齐缺数据
         </el-button>
-        <el-button type="primary" plain :loading="syncAll" @click="onSyncAll">
-          <el-icon class="mr-1"><Refresh /></el-icon>触发全量日 K 同步
+        <el-button type="primary" :loading="syncAll" @click="onSyncAll">
+          <el-icon class="mr-1"><Refresh /></el-icon>全量日 K 同步
         </el-button>
       </div>
     </div>
 
-    <!-- 统计 -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-      <div class="admin-card p-5 flex items-center justify-between">
+    <!-- 统计卡片（全局口径，不跟随翻页） -->
+    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(99,102,241,.15); color:#a5b4fc"><el-icon><Coin /></el-icon></div>
         <div>
-          <p class="text-xs text-gray-500 mb-1">股票总数</p>
-          <h3 class="text-3xl font-bold text-gray-100 font-mono">{{ stocks.length }}</h3>
-        </div>
-        <div class="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400">
-          <el-icon class="text-2xl"><Coin /></el-icon>
+          <div class="stat-label">股票总数</div>
+          <div class="stat-value">{{ stats.total }}</div>
         </div>
       </div>
-      <div class="admin-card p-5 flex items-center justify-between">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(16,185,129,.12); color:#34d399"><el-icon><CircleCheck /></el-icon></div>
         <div>
-          <p class="text-xs text-gray-500 mb-1">已有日 K 数据</p>
-          <h3 class="text-3xl font-bold text-green-400 font-mono">{{ withDataCount }}</h3>
-        </div>
-        <div class="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center text-green-400">
-          <el-icon class="text-2xl"><CircleCheck /></el-icon>
+          <div class="stat-label">已有日 K 数据</div>
+          <div class="stat-value" style="color:#34d399">{{ stats.withData }}</div>
         </div>
       </div>
-      <div class="admin-card p-5 flex items-center justify-between">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:rgba(239,68,68,.1); color:#f87171"><el-icon><Warning /></el-icon></div>
         <div>
-          <p class="text-xs text-gray-500 mb-1">缺数据股票</p>
-          <h3 class="text-3xl font-bold font-mono"
-              :class="missingCount > 0 ? 'text-red-400' : 'text-gray-300'">{{ missingCount }}</h3>
+          <div class="stat-label">缺数据股票</div>
+          <div class="stat-value" :style="stats.missing > 0 ? 'color:#f87171' : 'color:#9ca3af'">{{ stats.missing }}</div>
         </div>
-        <div class="w-12 h-12 bg-red-500/10 rounded-xl flex items-center justify-center text-red-400">
-          <el-icon class="text-2xl"><Warning /></el-icon>
+      </div>
+    </div>
+
+    <!-- 同步进度面板（running 时才出现） -->
+    <div v-if="sync.running" class="admin-card p-4 mb-4 border border-indigo-500/20">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2 text-sm">
+          <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse shadow-[0_0_8px_#818cf8]"></span>
+          <span class="text-gray-200 font-medium">{{ syncTypeLabel }} 进行中</span>
+          <span class="text-gray-500 text-xs font-mono">{{ sync.currentStock || '准备中' }}</span>
         </div>
+        <div class="text-xs text-gray-500 font-mono">
+          {{ sync.processed }} / {{ sync.total }} ·
+          成功 <span class="text-emerald-400">{{ sync.success }}</span> ·
+          失败 <span class="text-rose-400">{{ sync.failed }}</span>
+        </div>
+      </div>
+      <el-progress
+        :percentage="syncPercent"
+        :stroke-width="8"
+        :show-text="false"
+        :color="syncPercent >= 100 ? '#34d399' : '#818cf8'"
+      />
+      <div v-if="sync.lastError" class="mt-2 text-[11px] text-rose-400 font-mono truncate">
+        最近错误：{{ sync.lastError }}
+      </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="admin-toolbar">
+      <div class="flex items-center gap-2 text-xs text-gray-500">
+        <el-icon><Search /></el-icon><span>查找股票</span>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <el-input v-model="search" placeholder="代码/名称/行业" clearable class="!w-56"
+                  @keyup.enter="onSearch" @clear="onSearch">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-select v-model="marketFilter" placeholder="市场" clearable class="!w-32" @change="onSearch">
+          <el-option label="全部" value="" />
+          <el-option label="上交所" value="SH" />
+          <el-option label="深交所" value="SZ" />
+        </el-select>
+        <el-button type="primary" :loading="loading" @click="onSearch">
+          <el-icon class="mr-1"><Refresh /></el-icon>查询
+        </el-button>
       </div>
     </div>
 
     <!-- 表格 -->
     <div class="admin-card p-4">
-      <el-table :data="filteredStocks" class="admin-table" v-loading="loading"
+      <el-table :data="stocks" class="admin-table" v-loading="loading"
                 element-loading-background="rgba(0,0,0,0.4)" empty-text="股票池为空">
         <el-table-column prop="stockCode" label="代码" width="120">
           <template #default="{ row }">
-            <span class="font-mono text-blue-300 font-bold bg-blue-500/10 px-2 py-1 rounded text-xs">
+            <span class="font-mono text-indigo-300 font-semibold bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded text-xs">
               {{ row.stockCode }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="stockName" label="名称" min-width="140" />
+        <el-table-column prop="stockName" label="名称" min-width="140">
+          <template #default="{ row }">
+            <span class="text-gray-100">{{ row.stockName || '--' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="市场" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.market === 'SH' ? 'danger' : 'primary'" size="small" disable-transitions>
+            <span class="dot-tag" :class="row.market === 'SH' ? 'danger' : 'info'">
               {{ row.market === 'SH' ? '上交所' : '深交所' }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
         <el-table-column prop="industryName" label="行业" min-width="140">
@@ -82,9 +120,10 @@
         </el-table-column>
         <el-table-column label="日 K 数据" min-width="160" align="center">
           <template #default="{ row }">
-            <span v-if="row.dailyPriceCount > 0"
-                  class="text-green-400 font-mono">{{ row.dailyPriceCount }} 条</span>
-            <span v-else class="text-red-400 font-mono">缺数据</span>
+            <span v-if="row.dailyPriceCount > 0" class="dot-tag success">
+              {{ row.dailyPriceCount }} 条
+            </span>
+            <span v-else class="dot-tag danger">缺数据</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" align="center">
@@ -93,6 +132,19 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="flex justify-end pt-3">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="size"
+          :page-sizes="[20, 50, 100, 200]"
+          :total="total"
+          background
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="reload"
+          @size-change="reload"
+        />
+      </div>
     </div>
 
     <!-- 新增股票 -->
@@ -123,7 +175,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Coin, Search, Plus, Refresh, MagicStick, CircleCheck, Warning
@@ -133,6 +185,57 @@ import request from '../../utils/request'
 const stocks = ref([])
 const loading = ref(false)
 const search = ref('')
+const marketFilter = ref('')
+
+const page = ref(1)
+const size = ref(20)
+const total = ref(0)
+
+const stats = ref({ total: 0, withData: 0, missing: 0 })
+
+const sync = ref({
+  running: false, type: '', currentStock: '',
+  total: 0, processed: 0, success: 0, failed: 0,
+  startedAt: null, finishedAt: null, lastError: null
+})
+let syncTimer = null
+
+const syncPercent = computed(() => {
+  const t = sync.value.total || 0
+  if (!t) return 0
+  return Math.min(100, Math.round((sync.value.processed / t) * 100))
+})
+
+const syncTypeLabel = computed(() => {
+  const map = { ALL: '全量日 K 同步', MISSING: '补齐缺数据股票', SCHEDULED: '定时同步', COLDSTART: '冷启动同步' }
+  return map[sync.value.type] || '同步任务'
+})
+
+const pollSyncStatus = async () => {
+  try {
+    const res = await request.get('/admin/stocks/sync-status')
+    if (res.code !== 200) return
+    const wasRunning = sync.value.running
+    sync.value = res.data
+    if (wasRunning && !sync.value.running) {
+      // 刚刚还在跑，现在结束了 → 停轮询并刷新列表/统计
+      stopPollSync()
+      ElMessage.success(`${syncTypeLabel.value}完成：成功 ${sync.value.success} / ${sync.value.total}`)
+      reload()
+      loadStats()
+    } else if (sync.value.running && !syncTimer) {
+      // 外部付起了任务·求补上轮询
+      startPollSync()
+    }
+  } catch (_) { /* 静默 */ }
+}
+const startPollSync = () => {
+  if (syncTimer) return
+  syncTimer = setInterval(pollSyncStatus, 2000)
+}
+const stopPollSync = () => {
+  if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
+}
 
 const addDialog = ref(false)
 const addForm = ref({ stockCode: '', stockName: '', market: 'SH', industryName: '' })
@@ -141,25 +244,34 @@ const adding = ref(false)
 const syncAll = ref(false)
 const syncMissing = ref(false)
 
-const withDataCount = computed(() => stocks.value.filter(s => s.dailyPriceCount > 0).length)
-const missingCount = computed(() => stocks.value.filter(s => !s.dailyPriceCount).length)
-
-const filteredStocks = computed(() => {
-  const kw = search.value.trim().toLowerCase()
-  if (!kw) return stocks.value
-  return stocks.value.filter(s =>
-    (s.stockCode || '').toLowerCase().includes(kw) ||
-    (s.stockName || '').toLowerCase().includes(kw) ||
-    (s.industryName || '').toLowerCase().includes(kw)
-  )
-})
+const loadStats = async () => {
+  try {
+    const res = await request.get('/admin/stocks/stats')
+    if (res.code === 200) stats.value = res.data || { total: 0, withData: 0, missing: 0 }
+  } catch (_) { /* 全局不阻断列表 */ }
+}
 
 const reload = async () => {
   loading.value = true
   try {
-    const res = await request.get('/admin/stocks')
-    if (res.code === 200) stocks.value = res.data || []
+    const res = await request.get('/admin/stocks', {
+      params: {
+        page: page.value,
+        size: size.value,
+        keyword: search.value.trim() || undefined,
+        market: marketFilter.value || undefined
+      }
+    })
+    if (res.code === 200) {
+      stocks.value = res.data.records || []
+      total.value = res.data.total || 0
+    }
   } finally { loading.value = false }
+}
+
+const onSearch = () => {
+  page.value = 1
+  reload()
 }
 
 const onAdd = async () => {
@@ -175,6 +287,7 @@ const onAdd = async () => {
       addDialog.value = false
       addForm.value = { stockCode: '', stockName: '', market: 'SH', industryName: '' }
       reload()
+      loadStats()
     }
   } finally { adding.value = false }
 }
@@ -190,10 +303,15 @@ const onDelete = async (row) => {
   if (res.code === 200) {
     ElMessage.success('已删除')
     reload()
+    loadStats()
   }
 }
 
 const onSyncAll = async () => {
+  if (sync.value.running) {
+    ElMessage.warning('已有同步任务在运行，请等待完成')
+    return
+  }
   try {
     await ElMessageBox.confirm(
       '触发全量日 K 同步？该任务在后台异步运行，会重新拉取股票池中所有股票的最近 250 根日 K。',
@@ -203,21 +321,34 @@ const onSyncAll = async () => {
   syncAll.value = true
   try {
     const res = await request.post('/admin/stocks/sync')
-    if (res.code === 200) ElMessage.success(res.msg || '全量同步已启动')
+    if (res.code === 200) {
+      ElMessage.success(res.msg || '全量同步已启动')
+      // 马上拉一次状态让进度条出现，随后轮询会接管
+      setTimeout(pollSyncStatus, 600)
+    }
   } finally { syncAll.value = false }
 }
 
 const onSyncMissing = async () => {
+  if (sync.value.running) {
+    ElMessage.warning('已有同步任务在运行，请等待完成')
+    return
+  }
   syncMissing.value = true
   try {
     const res = await request.post('/admin/stocks/sync-missing')
     if (res.code === 200) {
       ElMessage.success(res.msg || '补齐任务已启动')
-      // 给后台一点时间，2秒后自动刷新
-      setTimeout(reload, 3000)
+      setTimeout(pollSyncStatus, 600)
     }
   } finally { syncMissing.value = false }
 }
 
-onMounted(reload)
+onMounted(() => {
+  reload()
+  loadStats()
+  // 页面初进去拉一次 — 可能有冷启动/定时任务正在跑
+  pollSyncStatus()
+})
+onUnmounted(stopPollSync)
 </script>
