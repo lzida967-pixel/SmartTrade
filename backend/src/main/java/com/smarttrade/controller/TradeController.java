@@ -1,6 +1,7 @@
 package com.smarttrade.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.smarttrade.annotation.AuditLog;
 import com.smarttrade.common.Result;
 import com.smarttrade.dto.PlaceOrderDTO;
 import com.smarttrade.entity.TradeDeal;
@@ -28,6 +29,10 @@ public class TradeController {
      * 下单（买入或卖出）
      */
     @PostMapping("/order")
+    @AuditLog(category = "TRADE", action = "PLACE_ORDER",
+            targetType = "STOCK", target = "#dto.stockCode",
+            summary = "下单 #{#dto.direction} #{#dto.stockCode} #{#dto.quantity}股 #{#dto.price == null ? '(市价)' : '@'+#dto.price}",
+            includeArgs = {"dto"})
     public Result<TradeOrder> placeOrder(@Validated @RequestBody PlaceOrderDTO dto) {
         Long userId = UserContext.getUserId();
         TradeOrder order = tradeService.placeOrder(userId, dto);
@@ -39,6 +44,10 @@ public class TradeController {
      * 撤单
      */
     @PostMapping("/order/{orderNo}/cancel")
+    @AuditLog(category = "TRADE", action = "CANCEL_ORDER",
+            targetType = "ORDER", target = "#orderNo",
+            summary = "用户撤单 #{#orderNo}",
+            includeArgs = {"orderNo"})
     public Result<TradeOrder> cancelOrder(@PathVariable("orderNo") String orderNo) {
         Long userId = UserContext.getUserId();
         TradeOrder order = tradeService.cancelOrder(userId, orderNo);

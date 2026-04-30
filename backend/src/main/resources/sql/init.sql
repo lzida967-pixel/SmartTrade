@@ -219,4 +219,33 @@ CREATE TABLE IF NOT EXISTS `zidatrade_user_watchlist` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户自选股收藏夹';
 -- 注意：上面的 COLLATE 必须和 zidatrade_stock_info 保持一致，否则外键会因 collate 不匹配建立失败
 
+-- ----------------------------
+-- 10. 操作审计日志表 `zidatrade_audit_log`
+-- ----------------------------
+-- 用于记录用户/管理员所有关键操作，满足"合规可追溯"要求。
+-- 不与 zidatrade_user 建立外键：登录失败 / 已删用户 也要能写入日志。
+CREATE TABLE IF NOT EXISTS `zidatrade_audit_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint DEFAULT NULL COMMENT '操作者ID（登录失败 / 系统操作时为空）',
+  `username` varchar(50) DEFAULT NULL COMMENT '操作者用户名（冗余存，便于直查）',
+  `role` varchar(20) DEFAULT NULL COMMENT '操作者角色：USER / ADMIN / GUEST',
+  `category` varchar(20) NOT NULL COMMENT '日志分类：AUTH/TRADE/ACCOUNT/ADMIN_USER/ADMIN_STOCK/ADMIN_ORDER',
+  `action` varchar(40) NOT NULL COMMENT '动作：LOGIN/PLACE_ORDER/CANCEL_ORDER/CHANGE_ROLE/...',
+  `target_type` varchar(40) DEFAULT NULL COMMENT '操作对象类型：USER/ORDER/STOCK',
+  `target_id` varchar(64) DEFAULT NULL COMMENT '操作对象ID/code/订单号',
+  `summary` varchar(255) DEFAULT NULL COMMENT '一句话摘要',
+  `details_json` varchar(2000) DEFAULT NULL COMMENT '关键参数JSON（已脱敏，不存密码/token）',
+  `result` varchar(20) NOT NULL DEFAULT 'SUCCESS' COMMENT 'SUCCESS/FAILURE',
+  `error_msg` varchar(500) DEFAULT NULL COMMENT '失败时的错误消息',
+  `ip` varchar(64) DEFAULT NULL COMMENT '请求IP',
+  `user_agent` varchar(255) DEFAULT NULL COMMENT '请求 UA（截断到255字符）',
+  `cost_ms` int DEFAULT NULL COMMENT '接口耗时(毫秒)',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '日志创建时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `idx_zidatrade_audit_user_time` (`user_id`, `created_at`) USING BTREE,
+  KEY `idx_zidatrade_audit_cat_action_time` (`category`, `action`, `created_at`) USING BTREE,
+  KEY `idx_zidatrade_audit_time` (`created_at`) USING BTREE,
+  KEY `idx_zidatrade_audit_target` (`target_type`, `target_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='操作审计日志';
+
 SET FOREIGN_KEY_CHECKS = 1;

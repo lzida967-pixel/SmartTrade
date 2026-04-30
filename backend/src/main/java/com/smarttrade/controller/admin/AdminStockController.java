@@ -3,6 +3,7 @@ package com.smarttrade.controller.admin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.smarttrade.annotation.AuditLog;
 import com.smarttrade.common.Result;
 import com.smarttrade.entity.StockDailyPrice;
 import com.smarttrade.entity.StockInfo;
@@ -145,6 +146,10 @@ public class AdminStockController {
      * 新增股票
      */
     @PostMapping
+    @AuditLog(category = "ADMIN_STOCK", action = "ADD_STOCK",
+            targetType = "STOCK", target = "#stock.stockCode",
+            summary = "新增股票 #{#stock.stockCode} #{#stock.stockName}",
+            includeArgs = {"stock"})
     public Result<StockInfo> add(@RequestBody StockInfo stock) {
         if (stock.getStockCode() == null || stock.getStockCode().isBlank()) {
             return Result.error("股票代码不能为空");
@@ -166,6 +171,10 @@ public class AdminStockController {
      */
     @DeleteMapping("/{stockCode}")
     @Transactional(rollbackFor = Exception.class)
+    @AuditLog(category = "ADMIN_STOCK", action = "DELETE_STOCK",
+            targetType = "STOCK", target = "#stockCode",
+            summary = "删除股票 #{#stockCode}",
+            includeArgs = {"stockCode"})
     public Result<Void> delete(@PathVariable String stockCode) {
         if (stockCode == null || stockCode.isBlank()) {
             return Result.error("股票代码不能为空");
@@ -210,6 +219,8 @@ public class AdminStockController {
      * 触发全量日 K 同步（异步执行，立即返回）
      */
     @PostMapping("/sync")
+    @AuditLog(category = "ADMIN_STOCK", action = "TRIGGER_SYNC_ALL",
+            summary = "触发全量日K同步")
     public Result<Void> syncAll() {
         new Thread(() -> {
             try {
@@ -235,6 +246,8 @@ public class AdminStockController {
      * 触发缺失股票同步（异步）
      */
     @PostMapping("/sync-missing")
+    @AuditLog(category = "ADMIN_STOCK", action = "TRIGGER_SYNC_MISSING",
+            summary = "触发缺失股票同步")
     public Result<Void> syncMissing() {
         new Thread(() -> {
             try {

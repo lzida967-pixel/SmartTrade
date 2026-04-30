@@ -2,6 +2,7 @@ package com.smarttrade.controller.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.smarttrade.annotation.AuditLog;
 import com.smarttrade.common.Result;
 import com.smarttrade.entity.TradeOrder;
 import com.smarttrade.entity.User;
@@ -93,6 +94,10 @@ public class AdminOrderController {
      * 强制撤单（无视所属 user）
      */
     @PostMapping("/{orderNo}/force-cancel")
+    @AuditLog(category = "ADMIN_ORDER", action = "FORCE_CANCEL",
+            targetType = "ORDER", target = "#orderNo",
+            summary = "管理员强制撤单 #{#orderNo}",
+            includeArgs = {"orderNo"})
     public Result<TradeOrder> forceCancel(@PathVariable String orderNo) {
         TradeOrder order = tradeOrderService.getById(orderNo);
         if (order == null) return Result.error("订单不存在");

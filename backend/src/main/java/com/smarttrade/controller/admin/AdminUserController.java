@@ -2,6 +2,7 @@ package com.smarttrade.controller.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.smarttrade.annotation.AuditLog;
 import com.smarttrade.common.Result;
 import com.smarttrade.entity.User;
 import com.smarttrade.service.UserService;
@@ -56,6 +57,10 @@ public class AdminUserController {
      * body: { "available": 100000, "frozen": 0, "action": "SET" }
      */
     @PutMapping("/{id}/funds")
+    @AuditLog(category = "ADMIN_USER", action = "ADJUST_FUNDS",
+            targetType = "USER", target = "#id",
+            summary = "调整用户#{#id}资金 #{#body['action']} available=#{#body['available']} frozen=#{#body['frozen']}",
+            includeArgs = {"id", "body"})
     public Result<User> updateFunds(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         User user = userService.getById(id);
         if (user == null) return Result.error("用户不存在");
@@ -87,6 +92,10 @@ public class AdminUserController {
      * 改角色：USER / ADMIN
      */
     @PutMapping("/{id}/role")
+    @AuditLog(category = "ADMIN_USER", action = "CHANGE_ROLE",
+            targetType = "USER", target = "#id",
+            summary = "改角色 用户#{#id} → #{#body['role']}",
+            includeArgs = {"id", "body"})
     public Result<Void> updateRole(@PathVariable Long id, @RequestBody Map<String, String> body) {
         String role = body.get("role");
         if (!"USER".equals(role) && !"ADMIN".equals(role)) {
@@ -104,6 +113,10 @@ public class AdminUserController {
      * 改状态：1 启用 / 0 禁用
      */
     @PutMapping("/{id}/status")
+    @AuditLog(category = "ADMIN_USER", action = "CHANGE_STATUS",
+            targetType = "USER", target = "#id",
+            summary = "改用户状态 用户#{#id} → #{#body['status']}",
+            includeArgs = {"id", "body"})
     public Result<Void> updateStatus(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
         Integer status = body.get("status");
         if (status == null || (status != 0 && status != 1)) {
@@ -121,6 +134,10 @@ public class AdminUserController {
      * 重置密码（重置为 123456，MD5）
      */
     @PutMapping("/{id}/reset-password")
+    @AuditLog(category = "ADMIN_USER", action = "RESET_PASSWORD",
+            targetType = "USER", target = "#id",
+            summary = "重置用户#{#id}密码",
+            includeArgs = {"id"})
     public Result<Void> resetPassword(@PathVariable Long id) {
         User u = new User();
         u.setId(id);
