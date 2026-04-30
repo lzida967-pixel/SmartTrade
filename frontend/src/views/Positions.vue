@@ -11,9 +11,14 @@
             我的持仓
           </div>
         </div>
-        <el-button type="primary" plain :loading="loading" @click="reload">
-          <el-icon class="mr-1"><Refresh /></el-icon>刷新
-        </el-button>
+        <div class="flex items-center gap-2">
+          <el-button plain :disabled="!positions.length" @click="exportCSV">
+            <el-icon class="mr-1"><Download /></el-icon>导出 CSV
+          </el-button>
+          <el-button type="primary" plain :loading="loading" @click="reload">
+            <el-icon class="mr-1"><Refresh /></el-icon>刷新
+          </el-button>
+        </div>
       </div>
 
       <!-- 资产汇总卡片 -->
@@ -129,9 +134,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Wallet, Refresh, DataLine } from '@element-plus/icons-vue'
+import { Wallet, Refresh, DataLine, Download } from '@element-plus/icons-vue'
 import request from '../utils/request'
 import OrderDialog from '../components/OrderDialog.vue'
+import { toCSV, downloadCSV, tsForFilename } from '../utils/csv'
 
 const positions = ref([])
 const asset = ref({
@@ -240,6 +246,44 @@ const openBuy = (row) => {
 const onPlaced = () => {
   ElMessage.success('已提交下单，刷新数据中...')
   reload()
+}
+
+const exportCSV = () => {
+  if (!positions.value.length) {
+    ElMessage.warning('当前没有持仓可导出')
+    return
+  }
+  const columns = [
+    { key: 'stockCode',          label: '股票代码' },
+    { key: 'stockName',          label: '股票名称', format: (r) => stockName(r.stockCode) },
+    { key: 'quantity',           label: '持仓数量' },
+    { key: 'availableQuantity',  label: '可卖数量' },
+    { key: 'frozenQuantity',     label: '冻结数量' },
+    { key: 'costPrice',          label: '成本价' },
+    { key: 'latestPrice',        label: '最新价' },
+    { key: 'marketValue',        label: '市值' },
+    { key: 'floatingProfit',     label: '浮动盈亏' },
+    { key: '__profitRate',       label: '盈亏比例(%)',
+      format: (r) => {
+        const cost = Number(r.costPrice) || 0
+        const latest = Number(r.latestPrice) || 0
+        if (cost <= 0) return ''
+        return ((latest - cost) / cost * 100).toFixed(2)
+      } },
+    { key: 'lastTradeDate',      label: '最近交易日' }
+  ]
+  const csv = toCSV(columns, positions.value)
+  // CSV 顶部追加 资产汇总 信息
+  const summary = [
+    `持仓快照导出  ${new Date().toLocaleString('zh-CN')}`,
+    `账户总资产: ¥${totalAssets.value.toFixed(2)}`,
+    `可用资金: ¥${Number(asset.value.availableFunds).toFixed(2)}`,
+    `冻结资金: ¥${Number(asset.value.frozenFunds).toFixed(2)}`,
+    `持仓市值: ¥${Number(asset.value.marketValue).toFixed(2)}`,
+    `浮动盈亏: ¥${Number(asset.value.floatingProfit).toFixed(2)}`
+  ]
+  downloadCSV(`持仓快照_${tsForFilename()}.csv`, csv, summary)
+  ElMessage.success(`已导出 ${positions.value.length} 条持仓`)
 }
 
 onMounted(reload)

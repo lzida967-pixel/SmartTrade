@@ -30,6 +30,18 @@
             <el-option label="部分成交" value="PARTIAL" />
             <el-option label="已撤销" value="CANCELED" />
           </el-select>
+          <el-dropdown trigger="click" @command="onExport" :disabled="loading">
+            <el-button plain :loading="exporting">
+              <el-icon class="mr-1"><Download /></el-icon>导出 CSV
+              <el-icon class="ml-1"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="orders">导出委托单（当前筛选）</el-dropdown-item>
+                <el-dropdown-item command="deals">导出成交记录（当前筛选）</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-button type="primary" plain :loading="loading" @click="reload">
             <el-icon class="mr-1"><Refresh /></el-icon>刷新
           </el-button>
@@ -147,8 +159,9 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { List, Search, Refresh, DataLine } from '@element-plus/icons-vue'
+import { List, Search, Refresh, DataLine, Download, ArrowDown } from '@element-plus/icons-vue'
 import request from '../utils/request'
+import { toCSV, downloadCSV, tsForFilename } from '../utils/csv'
 
 const router = useRouter()
 const goKline = (row) => {
@@ -208,6 +221,104 @@ const reload = async () => {
     }
   } catch (e) { /* request 已弹错 */ } finally {
     loading.value = false
+  }
+}
+
+// ============== CSV 导出 ==============
+const exporting = ref(false)
+
+/** 拉全量数据：在当前筛选条件下，循环拉直到取完，最多 10000 条 */
+const fetchAllOrders = async () => {
+  const params = { page: 1, size: 10000 }
+  if (filters.value.stockCode) params.stockCode = filters.value.stockCode.trim()
+  if (filters.value.status) params.status = filters.value.status
+  const res = await request.get('/trade/orders', { params })
+  if (res.code !== 200) return []
+  return res.data?.records || []
+}
+
+const fetchAllDeals = async () => {
+  const params = { page: 1, size: 10000 }
+  if (filters.value.stockCode) params.stockCode = filters.value.stockCode.trim()
+  const res = await request.get('/trade/deals', { params })
+  if (res.code !== 200) return []
+  return res.data?.records || []
+}
+
+const onExport = async (cmd) => {
+  if (cmd === 'orders') return exportOrders()
+  if (cmd === 'deals') return exportDeals()
+}
+
+const exportOrders = async () => {
+  exporting.value = true
+  try {
+    const list = await fetchAllOrders()
+    if (!list.length) {
+      ElMessage.warning('当前筛选下无委托单')
+      return
+    }
+    const cols = [
+      { key: 'orderNo',         label: '委托单号' },
+      { key: 'orderTime',       label: '委托时间', format: (r) => formatTime(r.orderTime) },
+      { key: 'stockCode',       label: '股票代码' },
+      { key: 'stockName',       label: '股票名称', format: (r) => stockName(r.stockCode) },
+      { key: 'direction',       label: '方向',     format: (r) => r.direction === 'BUY' ? '买入' : '卖出' },
+      { key: 'orderType',       label: '订单类型', format: (r) => r.orderType === 'MARKET' ? '市价' : '限价' },
+      { key: 'entrustPrice',    label: '委托价' },
+      { key: 'entrustQuantity', label: '委托数量' },
+      { key: 'matchPrice',      label: '成交价' },
+      { key: 'matchQuantity',   label: '成交数量' },
+      { key: 'turnoverAmount',  label: '成交金额' },
+      { key: 'orderStatus',     label: '状态',     format: (r) => statusLabel(r.orderStatus) },
+      { key: 'cancelTime',      label: '撤单时间', format: (r) => formatTime(r.cancelTime) }
+    ]
+    const csv = toCSV(cols, list)
+    const summary = [
+      `委托单导出  ${new Date().toLocaleString('zh-CN')}`,
+      `筛选条件: 股票=${filters.value.stockCode || '全部'}, 状态=${filters.value.status ? statusLabel(filters.value.status) : '全部'}`,
+      `共 ${list.length} 条`
+    ]
+    downloadCSV(`委托单_${tsForFilename()}.csv`, csv, summary)
+    ElMessage.success(`已导出 ${list.length} 条委托单`)
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+const exportDeals = async () => {
+  exporting.value = true
+  try {
+    const list = await fetchAllDeals()
+    if (!list.length) {
+      ElMessage.warning('当前筛选下无成交记录')
+      return
+    }
+    const cols = [
+      { key: 'orderNo',     label: '关联委托单号' },
+      { key: 'dealTime',    label: '成交时间', format: (r) => formatTime(r.dealTime) },
+      { key: 'stockCode',   label: '股票代码' },
+      { key: 'stockName',   label: '股票名称', format: (r) => stockName(r.stockCode) },
+      { key: 'dealPrice',   label: '成交价' },
+      { key: 'dealQuantity',label: '成交数量' },
+      { key: 'dealAmount',  label: '成交金额' }
+    ]
+    const csv = toCSV(cols, list)
+    const summary = [
+      `成交记录导出  ${new Date().toLocaleString('zh-CN')}`,
+      `筛选条件: 股票=${filters.value.stockCode || '全部'}`,
+      `共 ${list.length} 条`
+    ]
+    downloadCSV(`成交记录_${tsForFilename()}.csv`, csv, summary)
+    ElMessage.success(`已导出 ${list.length} 条成交记录`)
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('导出失败')
+  } finally {
+    exporting.value = false
   }
 }
 
