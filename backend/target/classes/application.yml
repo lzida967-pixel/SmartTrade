@@ -58,6 +58,20 @@ knife4j:
 smarttrade:
   # 股票池大小（启动时若 zidatrade_stock_info 为空，自动从东方财富拉取这么多支）
   stock-pool-size: 100
+  # AI Chat（通义千问 / DashScope - OpenAI 兼容模式）
+  ai:
+    chat:
+      enabled: true
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: sk-4059d3fcd1894b47b7e3a9c2820dc0b7
+      model: qwen3.5-122b-a10b
+      timeout-seconds: 60
+      max-history: 20         # 拼上下文时最多带这么多轮历史，避免 token 爆炸
+      system-prompt: |
+        你是 SmartTrade 平台的智能投资助手，名字叫"小智"。
+        你能回答 A 股相关问题，包括：股票基本面、技术指标、交易常识、风险提示等。
+        回答时请用中文，简洁清楚，必要时使用要点列表。
+        当涉及具体投资建议时，请提示"以上仅为信息参考，不构成投资建议"。
   # 日线行情同步参数
   daily-price:
     # 每只股票同步的最近 K 线根数

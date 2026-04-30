@@ -1,5 +1,6 @@
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\StockDailyPriceMapper.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\UserPositionService.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\AiChatController.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\vo\UserAssetVO.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\UserAssetSnapshotMapper.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\AssetService.java
@@ -22,6 +23,7 @@ D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\dto\LoginDTO.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\dto\PlaceOrderDTO.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\JwtInterceptor.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\admin\AdminDashboardController.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\AiChatProperties.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\StockMarketService.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\TradeDealMapper.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\UserService.java
@@ -32,6 +34,7 @@ D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\controller\StockIn
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\task\AssetSnapshotScheduler.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\impl\AiPredictLogServiceImpl.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\MyBatisPlusConfig.java
+D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\AiChatService.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\service\impl\TradeServiceImpl.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\mapper\TradeOrderMapper.java
 D:\SmartTrade\SmartTrade\backend\src\main\java\com\smarttrade\config\WebMvcConfig.java

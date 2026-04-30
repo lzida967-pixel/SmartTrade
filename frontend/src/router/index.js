@@ -30,6 +30,11 @@ const routes = [
     component: () => import('../views/Positions.vue')
   },
   {
+    path: '/ai',
+    name: 'AiAssistant',
+    component: () => import('../views/AiAssistant.vue')
+  },
+  {
     path: '/admin',
     component: () => import('../views/SystemAdmin.vue'),
     meta: { requireAdmin: true, hideLayout: true },

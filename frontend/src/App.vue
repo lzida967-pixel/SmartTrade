@@ -29,6 +29,10 @@
               <el-icon><Wallet /></el-icon>
               <span>我的持仓</span>
             </el-menu-item>
+            <el-menu-item index="/ai">
+              <el-icon><ChatDotRound /></el-icon>
+              <span>AI 助手</span>
+            </el-menu-item>
           </el-menu>
         </el-aside>
         

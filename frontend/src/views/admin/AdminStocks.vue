@@ -199,6 +199,9 @@ const sync = ref({
   startedAt: null, finishedAt: null, lastError: null
 })
 let syncTimer = null
+// 记录触发同步前服务端的 finishedAt；任务完成后该值会被后端更新，
+// 本地只要发现不一致就能识别出“在两次轮询之间闪现完成”的短任务。
+let priorFinishedAt = null
 
 const syncPercent = computed(() => {
   const t = sync.value.total || 0
@@ -217,15 +220,29 @@ const pollSyncStatus = async () => {
     if (res.code !== 200) return
     const wasRunning = sync.value.running
     sync.value = res.data
-    if (wasRunning && !sync.value.running) {
-      // 刚刚还在跑，现在结束了 → 停轮询并刷新列表/统计
+
+    // 识别“完成”的两种情形：
+    //   1) 上一次看到还在跑，本次 running=false （正常步调）
+    //   2) 本地控制台刚触发过任务，priorFinishedAt 与服务端 finishedAt 不同
+    //      → 说明中间跑完了一轮（不管轮询有没有看到中间的 running=true）
+    const finishedAtChanged = priorFinishedAt !== null
+        && sync.value.finishedAt
+        && sync.value.finishedAt !== priorFinishedAt
+    const taskFinishedNow = !sync.value.running && (wasRunning || finishedAtChanged)
+
+    if (taskFinishedNow) {
       stopPollSync()
+      priorFinishedAt = null
       ElMessage.success(`${syncTypeLabel.value}完成：成功 ${sync.value.success} / ${sync.value.total}`)
       reload()
       loadStats()
-    } else if (sync.value.running && !syncTimer) {
-      // 外部付起了任务·求补上轮询
-      startPollSync()
+    } else if (sync.value.running) {
+      // 还在跑，保证轮询在跳
+      if (!syncTimer) startPollSync()
+    } else if (priorFinishedAt !== null) {
+      // 刚触发但任务还没指 “开始” / 也未“结束”（后台线程还没调起来）
+      // 继续轮询，不要提前退出
+      if (!syncTimer) startPollSync()
     }
   } catch (_) { /* 静默 */ }
 }
@@ -320,11 +337,17 @@ const onSyncAll = async () => {
   } catch { return }
   syncAll.value = true
   try {
+    // 触发前先抓一下服务端现在的 finishedAt，后面用它判定本次任务是否已跑完
+    try {
+      const probe = await request.get('/admin/stocks/sync-status')
+      if (probe.code === 200) priorFinishedAt = probe.data?.finishedAt || null
+    } catch (_) { priorFinishedAt = null }
+
     const res = await request.post('/admin/stocks/sync')
     if (res.code === 200) {
       ElMessage.success(res.msg || '全量同步已启动')
-      // 马上拉一次状态让进度条出现，随后轮询会接管
-      setTimeout(pollSyncStatus, 600)
+      startPollSync()
+      setTimeout(pollSyncStatus, 400)
     }
   } finally { syncAll.value = false }
 }
@@ -336,10 +359,17 @@ const onSyncMissing = async () => {
   }
   syncMissing.value = true
   try {
+    // 同上：先记下现在的 finishedAt，该是上一次任务完成时间点（或空）
+    try {
+      const probe = await request.get('/admin/stocks/sync-status')
+      if (probe.code === 200) priorFinishedAt = probe.data?.finishedAt || null
+    } catch (_) { priorFinishedAt = null }
+
     const res = await request.post('/admin/stocks/sync-missing')
     if (res.code === 200) {
       ElMessage.success(res.msg || '补齐任务已启动')
-      setTimeout(pollSyncStatus, 600)
+      startPollSync()
+      setTimeout(pollSyncStatus, 400)
     }
   } finally { syncMissing.value = false }
 }
@@ -350,5 +380,8 @@ onMounted(() => {
   // 页面初进去拉一次 — 可能有冷启动/定时任务正在跑
   pollSyncStatus()
 })
-onUnmounted(stopPollSync)
+onUnmounted(() => {
+  stopPollSync()
+  priorFinishedAt = null
+})
 </script>
