@@ -35,12 +35,26 @@
 
       <!-- 行情列表 -->
       <div class="chart-card overflow-hidden">
-        <div class="border-b border-white/5 pb-3 mb-4 flex justify-between items-center">
-          <span class="text-xs font-semibold tracking-widest text-cyan-400 flex items-center gap-2">
-            <DataLine class="w-4 h-4" /> 沪深主流股票实时行情
-          </span>
+        <div class="border-b border-white/5 pb-3 mb-4 flex justify-between items-center flex-wrap gap-3">
+          <div class="flex items-center gap-4 flex-wrap">
+            <span class="text-xs font-semibold tracking-widest text-cyan-400 flex items-center gap-2">
+              <DataLine class="w-4 h-4" /> 沪深主流股票实时行情
+            </span>
+            <!-- 全部 / 自选 切换 -->
+            <div class="market-tabs">
+              <button class="market-tab" :class="{ active: tab === 'all' }" @click="tab = 'all'">
+                <span>全部</span>
+                <span class="tab-count">{{ quotes.length }}</span>
+              </button>
+              <button class="market-tab" :class="{ active: tab === 'fav' }" @click="tab = 'fav'">
+                <el-icon class="text-amber-400"><Star /></el-icon>
+                <span>自选</span>
+                <span class="tab-count">{{ watchlist.size }}</span>
+              </button>
+            </div>
+          </div>
           <span class="text-[10px] text-gray-500 font-mono">
-            <span v-if="search">筛选 {{ filteredQuotes.length }} / </span>共 {{ quotes.length }} 支 · 点击查看 K 线
+            <span v-if="search">筛选 {{ filteredQuotes.length }} / </span>共 {{ filteredQuotes.length }} 支 · 点击行查看 K 线
           </span>
         </div>
 
@@ -56,10 +70,21 @@
             @row-click="handleSelect"
             stripe
             max-height="720"
-            empty-text="未找到匹配的股票"
+            :empty-text="tab === 'fav' ? '还没收藏自选股 · 点击 ⭐ 加入' : '未找到匹配的股票'"
             style="width: 100%; background: transparent;"
             class="market-table"
           >
+            <el-table-column label="" width="50" align="center">
+              <template #default="{ row }">
+                <button class="star-btn"
+                        :class="{ active: watchlist.has(row.stockCode) }"
+                        @click.stop="toggleWatch(row.stockCode)"
+                        :title="watchlist.has(row.stockCode) ? '取消自选' : '加入自选'">
+                  <el-icon v-if="watchlist.has(row.stockCode)"><StarFilled /></el-icon>
+                  <el-icon v-else><Star /></el-icon>
+                </button>
+              </template>
+            </el-table-column>
             <el-table-column prop="stockCode" label="代码" width="100" />
             <el-table-column prop="stockName" label="名称" width="120" />
             <el-table-column label="最新价" width="110" align="right">
@@ -190,13 +215,16 @@ import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import {
-  TrendCharts, DataLine, DataAnalysis, Refresh, Loading, Search
+  TrendCharts, DataLine, DataAnalysis, Refresh, Loading, Search,
+  Star, StarFilled
 } from '@element-plus/icons-vue'
 import request from '../utils/request'
 import OrderDialog from '../components/OrderDialog.vue'
+import { useWatchlistStore } from '../stores/watchlist'
 
 const route = useRoute()
 const router = useRouter()
+const watchlist = useWatchlistStore()
 
 const quotes = ref([])
 const selected = ref(null)
@@ -204,7 +232,14 @@ const klineLimit = ref(120)
 const loadingQuotes = ref(false)
 const loadingKline = ref(false)
 const search = ref('')
+const tab = ref('all')   // 'all' | 'fav'
 const dialogVisible = ref(false)
+
+// 切换自选
+const toggleWatch = async (code) => {
+  const nowFav = await watchlist.toggle(code)
+  ElMessage.success(nowFav ? '已加入自选' : '已移除自选')
+}
 // 缓存最近一次拉取到的 K 线数据，dialog 打开时 onOpened 钩子触发渲染
 let pendingKlinePoints = null
 
@@ -240,8 +275,13 @@ const onOrderPlaced = () => {
 
 const filteredQuotes = computed(() => {
   const kw = search.value.trim().toLowerCase()
-  if (!kw) return quotes.value
-  return quotes.value.filter(q => {
+  // 1) 先按 tab（全部 / 自选）过滤
+  let base = tab.value === 'fav'
+    ? quotes.value.filter(q => watchlist.has(q.stockCode))
+    : quotes.value
+  // 2) 再按搜索关键字过滤
+  if (!kw) return base
+  return base.filter(q => {
     return (q.stockCode && q.stockCode.toLowerCase().includes(kw))
         || (q.stockName && q.stockName.toLowerCase().includes(kw))
         || (q.industryName && q.industryName.toLowerCase().includes(kw))
@@ -490,7 +530,8 @@ const openByQueryCode = async (code) => {
 }
 
 onMounted(async () => {
-  await loadQuotes()
+  // 并行：行情列表 + 自选列表
+  await Promise.all([loadQuotes(), watchlist.refresh()])
   // 30 秒自动刷新
   timer = setInterval(loadQuotes, 30000)
   window.addEventListener('resize', handleResize)
@@ -516,6 +557,79 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* ============ 全部/自选 tabs ============ */
+.market-tabs {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.market-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.market-tab:hover {
+  color: #d1d5db;
+}
+.market-tab.active {
+  background: rgba(96, 165, 250, 0.12);
+  color: #93c5fd;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.3) inset;
+}
+.market-tab .tab-count {
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #9ca3af;
+  min-width: 20px;
+  text-align: center;
+}
+.market-tab.active .tab-count {
+  background: rgba(96, 165, 250, 0.2);
+  color: #bfdbfe;
+}
+
+/* ============ 自选星标按钮 ============ */
+.star-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #4b5563;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all .15s ease;
+}
+.star-btn:hover {
+  background: rgba(251, 191, 36, 0.08);
+  color: #fbbf24;
+  transform: scale(1.15);
+}
+.star-btn.active {
+  color: #fbbf24;
+}
+.star-btn.active:hover {
+  color: #f59e0b;
+}
+
 .chart-card {
   position: relative;
   background-color: rgba(12, 12, 14, 0.8);

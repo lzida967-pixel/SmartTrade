@@ -1,0 +1,12 @@
+# 本地敏感配置：仅放在你自己的机器上，已加入 .gitignore，不会提交到仓库
+# Spring Boot 会自动加载 application-local.yml（active 包含 local 时），覆盖 application.yml 同名项
+#
+# 使用方法：
+#   1. 把本文件复制一份，去掉 .example 后缀（→ application-local.yml）
+#   2. 在 application-local.yml 里填入你自己的 DashScope API Key
+#   3. 运行后端即可
+
+smarttrade:
+  ai:
+    chat:
+      api-key: sk-把你刚刚在 DashScope 控制台新建的 key 填这里

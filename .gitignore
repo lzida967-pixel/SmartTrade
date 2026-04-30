@@ -1,0 +1,45 @@
+# ============== 通用 ==============
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.bak
+
+# ============== IDE ==============
+.idea/
+*.iml
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+
+# ============== Java / Maven / Gradle ==============
+backend/target/
+**/target/
+*.class
+*.jar
+*.war
+
+# ============== Node / 前端 ==============
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/npm-debug.log*
+frontend/yarn-error.log
+frontend/pnpm-debug.log
+
+# ============== 敏感配置（关键！） ==============
+# 本地敏感配置，包含数据库密码、API Key、JWT Secret 等
+**/application-local.yml
+**/application-local.yaml
+**/application-local.properties
+
+# 一般 .env
+.env
+.env.local
+.env.*.local
+
+# 备份/dump
+*.sql.bak
+*.dump

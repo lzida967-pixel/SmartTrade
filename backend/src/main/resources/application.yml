@@ -7,7 +7,8 @@ spring:
   application:
     name: smart-trade-backend
   profiles:
-    active: dev
+    # 加上 local 是为了让 application-local.yml（已 gitignore）里的 api-key 生效
+    active: dev,local
   
   # 数据源配置 (请在本地MySQL创建smart_trade数据库)
   datasource:
@@ -63,7 +64,7 @@ smarttrade:
     chat:
       enabled: true
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      api-key: sk-4059d3fcd1894b47b7e3a9c2820dc0b7
+      api-key: ${DASHSCOPE_API_KEY:} # 通过环境变量提供，仓库不存明文
       model: qwen3.5-122b-a10b
       timeout-seconds: 60
       max-history: 20         # 拼上下文时最多带这么多轮历史，避免 token 爆炸

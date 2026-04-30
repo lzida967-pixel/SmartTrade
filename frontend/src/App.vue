@@ -146,6 +146,7 @@
 import { ref, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from './stores/user'
+import { useWatchlistStore } from './stores/watchlist'
 import { ElMessage } from 'element-plus'
 import request from './utils/request'
 import ProfileDialog from './components/ProfileDialog.vue'
@@ -158,6 +159,7 @@ import {
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const watchlistStore = useWatchlistStore()
 
 const profileVisible = ref(false)
 
@@ -189,6 +191,7 @@ watch(() => route.path, (newPath) => {
 const handleCommand = (command) => {
   if (command === 'logout') {
     userStore.clearAuth()
+    watchlistStore.reset()
     ElMessage.success('已安全断开服务端连接，登出成功')
     router.push('/login')
   } else if (command === 'profile') {

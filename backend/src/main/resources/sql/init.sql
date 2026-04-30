@@ -201,4 +201,22 @@ CREATE TABLE `zidatrade_user_asset_snapshot` (
   CONSTRAINT `fk_zidatrade_snapshot_user_id` FOREIGN KEY (`user_id`) REFERENCES `zidatrade_user` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户资产每日快照表';
 
+-- ----------------------------
+-- 9. 用户自选股表 `zidatrade_user_watchlist`
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `zidatrade_user_watchlist` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `stock_code` varchar(20) NOT NULL COMMENT '股票代码',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '排序值，越小越靠前',
+  `remark` varchar(100) DEFAULT NULL COMMENT '备注（可选）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '收藏时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uk_zidatrade_watchlist_user_stock` (`user_id`, `stock_code`) USING BTREE,
+  KEY `idx_zidatrade_watchlist_user` (`user_id`, `sort_order`) USING BTREE,
+  CONSTRAINT `fk_zidatrade_watchlist_user_id` FOREIGN KEY (`user_id`) REFERENCES `zidatrade_user` (`id`),
+  CONSTRAINT `fk_zidatrade_watchlist_stock_code` FOREIGN KEY (`stock_code`) REFERENCES `zidatrade_stock_info` (`stock_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户自选股收藏夹';
+-- 注意：上面的 COLLATE 必须和 zidatrade_stock_info 保持一致，否则外键会因 collate 不匹配建立失败
+
 SET FOREIGN_KEY_CHECKS = 1;
