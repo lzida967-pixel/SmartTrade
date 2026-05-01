@@ -7,14 +7,37 @@
  *   -> Python FastAPI (LightGBM 推理) -> 返回三类概率 + Top 特征
  */
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import request from '../utils/request'
+import { useUserStore } from '../stores/user'
 
-const codeInput = ref('600519')
+const route = useRoute()
+const userStore = useUserStore()
+// 支持从 URL query 读取股票代码（如 /prediction?code=600519）
+const codeInput = ref(route.query.code || '600519')
 const loading = ref(false)
 const result = ref(null)
 const error = ref('')
+
+// AI 报告相关状态
+const reportContent = ref('')         // 流式累积的 markdown 文本
+const reportStreaming = ref(false)    // 是否正在生成中
+const reportError = ref('')
+let reportAbortCtrl = null
+
+marked.setOptions({ breaks: true, gfm: true })
+const renderMarkdown = (text) => {
+  if (!text) return ''
+  try {
+    return DOMPurify.sanitize(marked.parse(String(text)))
+  } catch (_) {
+    return DOMPurify.sanitize(String(text).replace(/\n/g, '<br>'))
+  }
+}
 
 // 常用股票快捷
 const quickCodes = [
@@ -65,6 +88,11 @@ const fetchPrediction = async () => {
     ElMessage.warning('股票代码必须是 6 位数字')
     return
   }
+  // 切换股票时清空旧报告
+  stopReport()
+  reportContent.value = ''
+  reportError.value = ''
+
   loading.value = true
   error.value = ''
   try {
@@ -78,6 +106,98 @@ const fetchPrediction = async () => {
     result.value = null
   } finally {
     loading.value = false
+  }
+}
+
+// ============ 生成 AI 分析报告（SSE 流式）============
+const generateReport = async () => {
+  if (!result.value) {
+    ElMessage.warning('请先生成预测结果')
+    return
+  }
+  if (reportStreaming.value) return
+
+  const code = result.value.code
+  reportContent.value = ''
+  reportError.value = ''
+  reportStreaming.value = true
+  reportAbortCtrl = new AbortController()
+
+  try {
+    const resp = await fetch(`/api/prediction/lgbm/${code}/report`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/event-stream',
+        'Authorization': 'Bearer ' + (userStore.token || '')
+      },
+      signal: reportAbortCtrl.signal
+    })
+
+    if (!resp.ok || !resp.body) {
+      throw new Error('HTTP ' + resp.status)
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buf = ''
+    let currentEvent = 'message'
+    let dataLines = []
+
+    const dispatch = () => {
+      if (!dataLines.length) { currentEvent = 'message'; return }
+      const data = dataLines.join('\n')
+      dataLines = []
+      if (currentEvent === 'delta') {
+        reportContent.value += data
+      } else if (currentEvent === 'error') {
+        reportError.value = data
+      }
+      currentEvent = 'message'
+    }
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let idx
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const rawLine = buf.slice(0, idx)
+        buf = buf.slice(idx + 1)
+        const line = rawLine.replace(/\r$/, '')
+        if (!line) { dispatch(); continue }
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).replace(/^ /, ''))
+        }
+      }
+    }
+    dispatch()
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      reportError.value = e.message || '报告生成失败'
+      ElMessage.error('AI 报告生成失败：' + (e.message || e))
+    }
+  } finally {
+    reportStreaming.value = false
+    reportAbortCtrl = null
+  }
+}
+
+const stopReport = () => {
+  if (reportAbortCtrl) {
+    reportAbortCtrl.abort()
+    reportAbortCtrl = null
+  }
+}
+
+const copyReport = async () => {
+  if (!reportContent.value) return
+  try {
+    await navigator.clipboard.writeText(reportContent.value)
+    ElMessage.success('报告已复制到剪贴板')
+  } catch (_) {
+    ElMessage.warning('复制失败，请手动选择文本复制')
   }
 }
 
@@ -203,6 +323,14 @@ onBeforeUnmount(() => {
 })
 
 watch(() => result.value, () => nextTick(() => { renderProbaChart(); renderFeatureChart() }))
+
+// 监听 URL query.code 变化（从 Market.vue 跳转过来时）
+watch(() => route.query.code, (newCode) => {
+  if (newCode && newCode !== codeInput.value) {
+    codeInput.value = newCode
+    fetchPrediction()
+  }
+})
 
 // 特征中文释义
 const featureDescMap = {
@@ -456,6 +584,78 @@ const featureDescription = (name) => featureDescMap[name] || '—'
         </el-table>
       </div>
 
+      <!-- AI 智能分析报告 -->
+      <div class="rounded-xl border border-purple-900/40 bg-gradient-to-br from-purple-950/20 to-gray-900/30">
+        <div class="px-5 py-3 border-b border-purple-900/30 flex items-center justify-between flex-wrap gap-2">
+          <h3 class="text-base font-semibold flex items-center gap-2">
+            <el-icon class="text-purple-400"><ChatLineRound /></el-icon>
+            AI 智能分析报告
+            <el-tag size="small" type="info">由通义千问基于上方预测数据生成</el-tag>
+          </h3>
+          <div class="flex items-center gap-2">
+            <el-button
+              v-if="!reportStreaming && !reportContent"
+              type="primary"
+              size="small"
+              @click="generateReport"
+            >
+              <el-icon class="mr-1"><MagicStick /></el-icon>生成分析报告
+            </el-button>
+            <el-button
+              v-if="!reportStreaming && reportContent"
+              size="small"
+              @click="generateReport"
+            >
+              <el-icon class="mr-1"><RefreshRight /></el-icon>重新生成
+            </el-button>
+            <el-button
+              v-if="!reportStreaming && reportContent"
+              size="small"
+              @click="copyReport"
+            >
+              <el-icon class="mr-1"><DocumentCopy /></el-icon>复制
+            </el-button>
+            <el-button
+              v-if="reportStreaming"
+              size="small"
+              type="danger"
+              plain
+              @click="stopReport"
+            >
+              停止生成
+            </el-button>
+          </div>
+        </div>
+
+        <div class="p-5">
+          <!-- 未生成时的占位 -->
+          <div v-if="!reportContent && !reportStreaming && !reportError"
+               class="text-center text-gray-500 py-8">
+            <el-icon class="text-3xl text-purple-400/50"><ChatLineRound /></el-icon>
+            <div class="mt-3 text-sm">点击右上角按钮，AI 将基于模型预测数据生成结构化分析报告</div>
+            <div class="mt-1 text-xs text-gray-600">报告涵盖：综合判断 / 技术面 / 估值 / 风险 / 操作建议</div>
+          </div>
+
+          <!-- 错误 -->
+          <el-alert v-if="reportError" :title="reportError" type="error" :closable="false" class="mb-3" />
+
+          <!-- 思考中（已发请求但还没收到第一个 token）-->
+          <div v-if="reportStreaming && !reportContent"
+               class="flex items-center gap-3 text-purple-300/80 py-3 px-1">
+            <div class="thinking-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="text-sm">正在调用预测模型并请通义千问撰写报告... (首次约 3-8 秒)</span>
+          </div>
+
+          <!-- 流式 / 已完成内容 -->
+          <div v-if="reportContent"
+               class="markdown-body text-sm leading-relaxed"
+               v-html="renderMarkdown(reportContent + (reportStreaming ? '▌' : ''))">
+          </div>
+        </div>
+      </div>
+
       <!-- 免责声明 -->
       <el-alert
         :closable="false"
@@ -470,4 +670,66 @@ const featureDescription = (name) => featureDescMap[name] || '—'
 
 <style scoped>
 .font-mono { font-family: ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace; }
+
+/* AI 报告 markdown 排版（暗色主题） */
+.markdown-body { color: #cbd5e1; }
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3) {
+  color: #e2e8f0;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid rgba(148,163,184,0.15);
+}
+.markdown-body :deep(h2) { font-size: 1.1rem; color: #c4b5fd; }
+.markdown-body :deep(h3) { font-size: 1rem; }
+.markdown-body :deep(p) { margin: 0.5em 0; line-height: 1.7; }
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) { padding-left: 1.5em; margin: 0.5em 0; }
+.markdown-body :deep(li) { margin: 0.25em 0; }
+.markdown-body :deep(strong) { color: #fbbf24; font-weight: 600; }
+.markdown-body :deep(code) {
+  background: rgba(148,163,184,0.15);
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  font-size: 0.85em;
+  color: #93c5fd;
+}
+.markdown-body :deep(table) {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.85em;
+}
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid rgba(148,163,184,0.2);
+  padding: 0.4em 0.8em;
+}
+.markdown-body :deep(th) { background: rgba(148,163,184,0.08); }
+.markdown-body :deep(blockquote) {
+  border-left: 3px solid #a78bfa;
+  padding-left: 1em;
+  color: #94a3b8;
+  margin: 0.5em 0;
+}
+
+/* 思考中三点跳动动画 */
+.thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a78bfa;
+  animation: thinkingBounce 1.2s infinite ease-in-out;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinkingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
 </style>

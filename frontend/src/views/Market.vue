@@ -154,6 +154,9 @@
               {{ formatNum(selected.latestPrice) }}
               <span class="text-xs ml-1">{{ formatPercent(selected.changePercent) }}</span>
             </div>
+            <el-button size="small" type="primary" plain @click.stop="goPredict">
+              <el-icon class="mr-1"><MagicStick /></el-icon>AI 预测
+            </el-button>
             <el-button size="small" type="danger" @click.stop="openOrder('BUY')">买入</el-button>
             <el-button size="small" type="success" @click.stop="openOrder('SELL')">卖出</el-button>
           </div>
@@ -248,6 +251,13 @@ const orderDialogVisible = ref(false)
 const orderDirection = ref('BUY')
 const availableFunds = ref(0)
 const availableQty = ref(0)
+
+const goPredict = () => {
+  if (!selected.value?.stockCode) return
+  // 关闭详情弹窗，避免遮挡
+  dialogVisible.value = false
+  router.push({ path: '/prediction', query: { code: selected.value.stockCode } })
+}
 
 const openOrder = async (direction) => {
   orderDirection.value = direction
