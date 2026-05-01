@@ -1,0 +1,473 @@
+<script setup>
+/**
+ * AI 智能预测页 - LightGBM T+5 三分类预测
+ *
+ * 数据流：
+ *   用户输入代码 -> /api/prediction/lgbm/{code} (Spring Boot)
+ *   -> Python FastAPI (LightGBM 推理) -> 返回三类概率 + Top 特征
+ */
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import * as echarts from 'echarts'
+import request from '../utils/request'
+
+const codeInput = ref('600519')
+const loading = ref(false)
+const result = ref(null)
+const error = ref('')
+
+// 常用股票快捷
+const quickCodes = [
+  { code: '600519', name: '贵州茅台' },
+  { code: '000858', name: '五粮液' },
+  { code: '300750', name: '宁德时代' },
+  { code: '002384', name: '东山精密' },
+  { code: '601899', name: '紫金矿业' },
+  { code: '600036', name: '招商银行' }
+]
+
+// 标签元信息
+const labelMeta = {
+  0: { name: '看多', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', icon: '↑' },
+  1: { name: '震荡', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', icon: '—' },
+  2: { name: '看空', color: '#10b981', bg: 'rgba(16,185,129,0.12)', icon: '↓' }
+}
+
+const currentMeta = computed(() => result.value ? labelMeta[result.value.label] : null)
+
+const probaPercent = computed(() => {
+  if (!result.value) return { bullish: 0, neutral: 0, bearish: 0 }
+  const p = result.value.proba
+  return {
+    bullish: (p.bullish * 100).toFixed(1),
+    neutral: (p.neutral * 100).toFixed(1),
+    bearish: (p.bearish * 100).toFixed(1)
+  }
+})
+
+// 置信度等级
+const confidenceLevel = computed(() => {
+  if (!result.value) return null
+  const c = result.value.confidence
+  if (c >= 0.6) return { text: '高置信', color: '#10b981' }
+  if (c >= 0.45) return { text: '中等置信', color: '#f59e0b' }
+  return { text: '低置信', color: '#94a3b8' }
+})
+
+const fetchPrediction = async () => {
+  const raw = codeInput.value?.trim()
+  if (!raw) {
+    ElMessage.warning('请输入 6 位股票代码')
+    return
+  }
+  const code = raw.padStart(6, '0')
+  if (!/^\d{6}$/.test(code)) {
+    ElMessage.warning('股票代码必须是 6 位数字')
+    return
+  }
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await request.get(`/prediction/lgbm/${code}`)
+    result.value = res.data
+    await nextTick()
+    renderProbaChart()
+    renderFeatureChart()
+  } catch (e) {
+    error.value = e?.response?.data?.msg || '预测服务调用失败'
+    result.value = null
+  } finally {
+    loading.value = false
+  }
+}
+
+const selectQuick = (code) => {
+  codeInput.value = code
+  fetchPrediction()
+}
+
+// ---------- ECharts ----------
+let probaChart = null
+let featureChart = null
+const probaChartRef = ref(null)
+const featureChartRef = ref(null)
+
+const renderProbaChart = () => {
+  if (!probaChartRef.value || !result.value) return
+  if (!probaChart) probaChart = echarts.init(probaChartRef.value, 'dark')
+  const p = result.value.proba
+  probaChart.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 70, right: 30, top: 30, bottom: 30 },
+    xAxis: {
+      type: 'value',
+      max: 1,
+      axisLabel: { formatter: v => (v * 100).toFixed(0) + '%', color: '#94a3b8' },
+      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } }
+    },
+    yAxis: {
+      type: 'category',
+      data: ['看空', '震荡', '看多'],
+      axisLabel: { color: '#cbd5e1', fontSize: 14, fontWeight: 600 },
+      axisLine: { show: false },
+      axisTick: { show: false }
+    },
+    series: [{
+      type: 'bar',
+      data: [
+        { value: p.bearish, itemStyle: { color: '#10b981' } },
+        { value: p.neutral, itemStyle: { color: '#64748b' } },
+        { value: p.bullish, itemStyle: { color: '#ef4444' } }
+      ],
+      barWidth: 28,
+      label: {
+        show: true, position: 'right',
+        formatter: ({ value }) => (value * 100).toFixed(1) + '%',
+        color: '#e2e8f0', fontWeight: 600
+      },
+      itemStyle: { borderRadius: [0, 6, 6, 0] }
+    }]
+  })
+}
+
+const renderFeatureChart = () => {
+  if (!featureChartRef.value || !result.value?.topFeatures) return
+  if (!featureChart) featureChart = echarts.init(featureChartRef.value, 'dark')
+  const feats = [...result.value.topFeatures].reverse() // 倒序 => 重要性高在上
+  featureChart.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 130, right: 90, top: 20, bottom: 20 },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const f = feats[params[0].dataIndex]
+        return `<div style="font-weight:600">${f.name}</div>
+                <div>当前值: <b>${formatValue(f.name, f.value)}</b></div>
+                <div>重要性: ${f.importance}</div>`
+      }
+    },
+    xAxis: { type: 'value', show: false },
+    yAxis: {
+      type: 'category',
+      data: feats.map(f => f.name),
+      axisLabel: { color: '#cbd5e1', fontSize: 12 },
+      axisLine: { show: false }, axisTick: { show: false }
+    },
+    series: [{
+      type: 'bar',
+      data: feats.map(f => f.importance),
+      barWidth: 14,
+      itemStyle: {
+        color: { type: 'linear', x: 0, y: 0, x2: 1, y2: 0,
+          colorStops: [{ offset: 0, color: '#3b82f6' }, { offset: 1, color: '#06b6d4' }] },
+        borderRadius: [0, 4, 4, 0]
+      },
+      label: {
+        show: true, position: 'right',
+        formatter: ({ dataIndex }) => formatValue(feats[dataIndex].name, feats[dataIndex].value),
+        color: '#94a3b8', fontSize: 11
+      }
+    }]
+  })
+}
+
+// 特征值格式化
+const formatValue = (name, value) => {
+  if (value == null) return '—'
+  // 比率类（小数 → 百分比展示）
+  const pctFeats = ['ret_1d','ret_5d','ret_10d','ret_20d','ret_60d','close_ma5','close_ma10',
+    'close_ma20','close_ma60','ma5_ma20','ma10_ma60','vol_5d','vol_20d','vol_60d',
+    'atr_pct','dist_high_20','dist_low_20','bb_pos','bb_width']
+  if (pctFeats.includes(name)) return (value * 100).toFixed(2) + '%'
+  // turnover_rate_ma5 已经是百分比单位（baostock 原始就是 1.2 表示 1.2%）
+  if (name === 'turnover_rate_ma5') return value.toFixed(2) + '%'
+  // 倍数类
+  if (['vol_ratio_5','vol_ratio_20'].includes(name)) return value.toFixed(2) + 'x'
+  // 整数类
+  if (['up_streak'].includes(name)) return Math.round(value)
+  return value.toFixed(2)
+}
+
+const onResize = () => {
+  probaChart?.resize()
+  featureChart?.resize()
+}
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  fetchPrediction()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  probaChart?.dispose()
+  featureChart?.dispose()
+})
+
+watch(() => result.value, () => nextTick(() => { renderProbaChart(); renderFeatureChart() }))
+
+// 特征中文释义
+const featureDescMap = {
+  ret_1d: '近 1 日涨跌幅',
+  ret_5d: '近 5 日累计涨跌幅',
+  ret_10d: '近 10 日累计涨跌幅',
+  ret_20d: '近 20 日累计涨跌幅',
+  ret_60d: '近 60 日累计涨跌幅（中期动量）',
+  close_ma5: '收盘价相对 5 日均线偏离度',
+  close_ma10: '收盘价相对 10 日均线偏离度',
+  close_ma20: '收盘价相对 20 日均线偏离度',
+  close_ma60: '收盘价相对 60 日均线偏离度',
+  ma5_ma20: '5 日均线相对 20 日均线发散度',
+  ma10_ma60: '10 日均线相对 60 日均线发散度',
+  vol_5d: '近 5 日收益率标准差（短期波动）',
+  vol_20d: '近 20 日收益率标准差（中期波动）',
+  vol_60d: '近 60 日收益率标准差（长期波动）',
+  atr_pct: '14 日平均真实波幅 / 收盘价',
+  rsi_6: 'RSI(6) 强弱指标，>70 超买 / <30 超卖',
+  rsi_14: 'RSI(14) 强弱指标',
+  macd: 'MACD 主线值',
+  macd_signal: 'MACD 信号线值',
+  macd_diff: 'MACD 柱（差值）',
+  kdj_k: 'KDJ 的 K 值',
+  kdj_d: 'KDJ 的 D 值',
+  kdj_j: 'KDJ 的 J 值',
+  bb_pos: '布林带相对位置（0=下轨，1=上轨）',
+  bb_width: '布林带带宽 / 中轨',
+  vol_ratio_5: '当日量 / 5 日均量（量比）',
+  vol_ratio_20: '当日量 / 20 日均量',
+  turnover_rate_ma5: '5 日平均换手率',
+  up_streak: '连涨天数',
+  dist_high_20: '收盘价相对 20 日最高价距离',
+  dist_low_20: '收盘价相对 20 日最低价距离',
+  pe_ttm: 'PE-TTM 动态市盈率',
+  pb_mrq: 'PB 市净率',
+  ps_ttm: 'PS-TTM 市销率',
+  log_amount: '成交额对数（log1p）'
+}
+const featureDescription = (name) => featureDescMap[name] || '—'
+</script>
+
+<template>
+  <div class="p-6 space-y-6">
+    <!-- 顶部标题 -->
+    <div>
+      <h2 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
+        <el-icon class="text-blue-500"><MagicStick /></el-icon>
+        智能预测
+        <el-tag size="small" type="info">LightGBM · T+5</el-tag>
+      </h2>
+      <p class="text-sm text-gray-400 mt-1">
+        基于 35 维历史价量 + 基本面特征的 LightGBM 三分类模型，预测未来 5 个交易日涨跌幅区间
+      </p>
+    </div>
+
+    <!-- 操作区（独立一行，避免挤压） -->
+    <div class="rounded-xl p-4 border border-gray-800 bg-gray-900/30 flex items-center gap-3 flex-wrap">
+      <el-input
+        v-model="codeInput"
+        placeholder="输入 6 位股票代码"
+        class="!w-52"
+        maxlength="6"
+        @keyup.enter="fetchPrediction"
+        clearable
+      >
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
+      <el-button type="primary" :loading="loading" @click="fetchPrediction">
+        开始预测
+      </el-button>
+      <el-divider direction="vertical" class="!mx-3" />
+      <span class="text-xs text-gray-500 mr-1">常用：</span>
+      <el-tag
+        v-for="q in quickCodes" :key="q.code"
+        class="!cursor-pointer"
+        :effect="codeInput === q.code ? 'dark' : 'plain'"
+        @click="selectQuick(q.code)"
+      >
+        {{ q.code }} {{ q.name }}
+      </el-tag>
+    </div>
+
+    <!-- 错误提示 -->
+    <el-alert v-if="error" :title="error" type="error" :closable="false" />
+
+    <!-- Loading 骨架屏 -->
+    <div v-if="loading && !result" class="text-center py-20 text-gray-500">
+      <el-icon class="animate-spin text-3xl"><Loading /></el-icon>
+      <div class="mt-3">正在调用 LightGBM 推理...</div>
+    </div>
+
+    <!-- 结果区 -->
+    <template v-if="result">
+      <!-- 核心结论卡片：lg 屏 3 列，md 屏 2 列，sm 屏 1 列 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- 主信号 -->
+        <div class="rounded-xl p-5 border border-gray-800 lg:col-span-1"
+             :style="{ background: currentMeta.bg }">
+          <div class="text-xs text-gray-400 mb-3 flex items-center gap-1">
+            预测结论
+            <el-tooltip placement="top">
+              <template #content>
+                模型对未来 {{ result.forwardDays }} 个交易日累计涨跌幅做出的三分类判断<br/>
+                看多 = 涨幅 &gt; +{{ (result.threshold*100).toFixed(0) }}%<br/>
+                震荡 = 涨跌幅在 ±{{ (result.threshold*100).toFixed(0) }}% 内<br/>
+                看空 = 跌幅 &gt; -{{ (result.threshold*100).toFixed(0) }}%
+              </template>
+              <el-icon class="text-gray-500 cursor-help"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="text-5xl font-bold leading-none" :style="{ color: currentMeta.color }">
+              {{ currentMeta.icon }}
+            </div>
+            <div class="min-w-0">
+              <div class="text-3xl font-bold" :style="{ color: currentMeta.color }">
+                {{ result.labelName }}
+              </div>
+              <div class="text-xs text-gray-500 mt-1 leading-tight">
+                {{ result.label === 0 ? `预计 ${result.forwardDays} 日涨幅 > +${(result.threshold*100).toFixed(0)}%` :
+                   result.label === 2 ? `预计 ${result.forwardDays} 日跌幅 > -${(result.threshold*100).toFixed(0)}%` :
+                   `预计 ${result.forwardDays} 日波动在 ±${(result.threshold*100).toFixed(0)}% 内` }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 置信度 -->
+        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/40">
+          <div class="text-xs text-gray-400 mb-3 flex items-center gap-1">
+            模型置信度
+            <el-tooltip placement="top">
+              <template #content>
+                即预测类别对应的概率值。<br/>
+                随机猜测 ≈ 33.3%；本模型测试集 macro-F1 ≈ 0.45。<br/>
+                建议：&ge; 60% 高置信，45-60% 中等，&lt; 45% 低置信仅供参考。
+              </template>
+              <el-icon class="text-gray-500 cursor-help"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </div>
+          <div class="flex items-baseline gap-2 flex-wrap">
+            <div class="text-4xl font-bold text-white leading-none">
+              {{ (result.confidence * 100).toFixed(1) }}<span class="text-2xl">%</span>
+            </div>
+            <el-tag size="small" :style="{ color: confidenceLevel.color, borderColor: confidenceLevel.color }">
+              {{ confidenceLevel.text }}
+            </el-tag>
+          </div>
+          <el-progress
+            :percentage="result.confidence * 100"
+            :color="confidenceLevel.color"
+            :show-text="false"
+            class="mt-3"
+          />
+          <div class="text-xs text-gray-500 mt-2 leading-tight">
+            随机基线 33.3%，本预测{{ result.confidence > 0.4 ? '显著高于' : '接近' }}随机水平
+          </div>
+        </div>
+
+        <!-- 元信息（在 md 屏单独占整行避免截断） -->
+        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/40 md:col-span-2 lg:col-span-1">
+          <div class="text-xs text-gray-400 mb-3 flex items-center gap-1">
+            预测元信息
+            <el-tooltip placement="top">
+              <template #content>
+                <b>基准日期</b>：模型使用的最新一根 K 线日期<br/>
+                <b>预测周期</b>：模型预测未来多少个交易日<br/>
+                <b>分类阈值</b>：±N% 是看多/看空的边界<br/>
+                <b>模型版本</b>：训练好的模型文件标识
+              </template>
+              <el-icon class="text-gray-500 cursor-help"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <div>
+              <div class="text-xs text-gray-500">股票代码</div>
+              <div class="font-mono font-semibold">{{ result.code }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-gray-500">基准日期</div>
+              <div class="font-mono">{{ result.asOfDate }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-gray-500">预测周期</div>
+              <div>T+{{ result.forwardDays }} 日</div>
+            </div>
+            <div>
+              <div class="text-xs text-gray-500">分类阈值</div>
+              <div>±{{ (result.threshold * 100).toFixed(0) }}%</div>
+            </div>
+            <div class="col-span-2 md:col-span-1 lg:col-span-2">
+              <div class="text-xs text-gray-500">模型版本</div>
+              <el-tag size="small" type="primary">{{ result.modelVersion }}</el-tag>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 双图区 -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- 三类概率分布 -->
+        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/30">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-semibold flex items-center gap-2">
+              <el-icon class="text-blue-400"><PieChart /></el-icon>
+              三类概率分布
+            </h3>
+            <span class="text-xs text-gray-500">和为 100%</span>
+          </div>
+          <div ref="probaChartRef" class="w-full h-[220px]"></div>
+        </div>
+
+        <!-- Top 特征 -->
+        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/30">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-semibold flex items-center gap-2">
+              <el-icon class="text-cyan-400"><DataAnalysis /></el-icon>
+              Top 8 关键特征
+            </h3>
+            <span class="text-xs text-gray-500">右侧为该股当前值</span>
+          </div>
+          <div ref="featureChartRef" class="w-full h-[260px]"></div>
+        </div>
+      </div>
+
+      <!-- 特征详情表 -->
+      <div class="rounded-xl border border-gray-800 bg-gray-900/30">
+        <div class="px-5 py-3 border-b border-gray-800 text-base font-semibold">特征详情</div>
+        <el-table :data="result.topFeatures" stripe size="small" :show-header="true">
+          <el-table-column prop="name" label="特征名" width="200">
+            <template #default="{ row }">
+              <span class="font-mono text-xs">{{ row.name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="含义" min-width="280">
+            <template #default="{ row }">
+              <span class="text-gray-400 text-xs">{{ featureDescription(row.name) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="当前值" width="120" align="right">
+            <template #default="{ row }">
+              <span class="font-mono">{{ formatValue(row.name, row.value) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="重要性" width="120" align="right">
+            <template #default="{ row }">
+              <el-tag size="small" type="primary">{{ row.importance }}</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <!-- 免责声明 -->
+      <el-alert
+        :closable="false"
+        type="warning"
+        show-icon
+        title="风险提示"
+        :description="result.disclaimer + ' 模型基于过去 3 年数据训练，可能不能反映极端行情。投资决策请综合多方信息，自主判断风险。'"
+      />
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.font-mono { font-family: ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace; }
+</style>

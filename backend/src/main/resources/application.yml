@@ -73,6 +73,13 @@ smarttrade:
         你能回答 A 股相关问题，包括：股票基本面、技术指标、交易常识、风险提示等。
         回答时请用中文，简洁清楚，必要时使用要点列表。
         当涉及具体投资建议时，请提示"以上仅为信息参考，不构成投资建议"。
+  # 机器学习预测服务网关（外部 Python FastAPI）
+  prediction:
+    enabled: true
+    base-url: http://127.0.0.1:8001
+    timeout-seconds: 15
+    # 单次响应内存缓存（毫秒），避免重复打到 Python 服务
+    cache-ttl-ms: 60000
   # 日线行情同步参数
   daily-price:
     # 每只股票同步的最近 K 线根数

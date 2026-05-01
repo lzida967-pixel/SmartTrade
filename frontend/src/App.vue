@@ -33,6 +33,10 @@
               <el-icon><ChatDotRound /></el-icon>
               <span>AI 助手</span>
             </el-menu-item>
+            <el-menu-item index="/prediction">
+              <el-icon><MagicStick /></el-icon>
+              <span>智能预测</span>
+            </el-menu-item>
           </el-menu>
         </el-aside>
         
@@ -153,7 +157,7 @@ import ProfileDialog from './components/ProfileDialog.vue'
 import { 
   TrendCharts, DataBoard, List, Wallet, 
   User, Key, SwitchButton, ArrowRight,
-  ChatDotRound, Trophy, Monitor
+  ChatDotRound, Trophy, Monitor, MagicStick
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

@@ -35,6 +35,11 @@ const routes = [
     component: () => import('../views/AiAssistant.vue')
   },
   {
+    path: '/prediction',
+    name: 'Prediction',
+    component: () => import('../views/Prediction.vue')
+  },
+  {
     path: '/admin',
     component: () => import('../views/SystemAdmin.vue'),
     meta: { requireAdmin: true, hideLayout: true },
