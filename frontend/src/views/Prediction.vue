@@ -279,7 +279,7 @@ const renderFeatureChart = () => {
       barWidth: 14,
       itemStyle: {
         color: { type: 'linear', x: 0, y: 0, x2: 1, y2: 0,
-          colorStops: [{ offset: 0, color: '#3b82f6' }, { offset: 1, color: '#06b6d4' }] },
+          colorStops: [{ offset: 0, color: '#f59e0b' }, { offset: 1, color: '#fbbf24' }] },
         borderRadius: [0, 4, 4, 0]
       },
       label: {
@@ -374,11 +374,11 @@ const featureDescription = (name) => featureDescMap[name] || '—'
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
+  <div class="p-8 flex flex-col gap-6">
     <!-- 顶部标题 -->
     <div>
       <h2 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
-        <el-icon class="text-blue-500"><MagicStick /></el-icon>
+        <el-icon class="text-amber-400"><MagicStick /></el-icon>
         智能预测
         <el-tag size="small" type="info">LightGBM · T+5</el-tag>
       </h2>
@@ -388,25 +388,26 @@ const featureDescription = (name) => featureDescMap[name] || '—'
     </div>
 
     <!-- 操作区（独立一行，避免挤压） -->
-    <div class="rounded-xl p-4 border border-gray-800 bg-gray-900/30 flex items-center gap-3 flex-wrap">
+    <div class="rounded-2xl p-5 border border-gray-800 bg-gray-900/30 flex items-center gap-3 flex-wrap">
       <el-input
         v-model="codeInput"
         placeholder="输入 6 位股票代码"
-        class="!w-52"
+        class="!w-52 soft-input"
         maxlength="6"
         @keyup.enter="fetchPrediction"
         clearable
       >
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
-      <el-button type="primary" :loading="loading" @click="fetchPrediction">
+      <el-button round :loading="loading" @click="fetchPrediction" class="amber-btn !px-6">
         开始预测
       </el-button>
       <el-divider direction="vertical" class="!mx-3" />
       <span class="text-xs text-gray-500 mr-1">常用：</span>
       <el-tag
         v-for="q in quickCodes" :key="q.code"
-        class="!cursor-pointer"
+        round
+        class="!cursor-pointer quick-tag"
         :effect="codeInput === q.code ? 'dark' : 'plain'"
         @click="selectQuick(q.code)"
       >
@@ -426,10 +427,10 @@ const featureDescription = (name) => featureDescMap[name] || '—'
     <!-- 结果区 -->
     <template v-if="result">
       <!-- 核心结论卡片：lg 屏 3 列，md 屏 2 列，sm 屏 1 列 -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <!-- 主信号 -->
-        <div class="rounded-xl p-5 border border-gray-800 lg:col-span-1"
-             :style="{ background: currentMeta.bg }">
+        <div class="rounded-2xl border border-gray-800 lg:col-span-1"
+             :style="{ background: currentMeta.bg, padding: '20px 24px' }">
           <div class="text-xs text-gray-400 mb-3 flex items-center gap-1">
             预测结论
             <el-tooltip placement="top">
@@ -460,7 +461,7 @@ const featureDescription = (name) => featureDescMap[name] || '—'
         </div>
 
         <!-- 置信度 -->
-        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/40">
+        <div class="rounded-2xl border border-gray-800 bg-gray-900/40" style="padding: 20px 24px;">
           <div class="text-xs text-gray-400 mb-3 flex items-center gap-1">
             模型置信度
             <el-tooltip placement="top">
@@ -492,7 +493,7 @@ const featureDescription = (name) => featureDescMap[name] || '—'
         </div>
 
         <!-- 元信息（在 md 屏单独占整行避免截断） -->
-        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/40 md:col-span-2 lg:col-span-1">
+        <div class="rounded-2xl border border-gray-800 bg-gray-900/40 md:col-span-2 lg:col-span-1" style="padding: 20px 24px;">
           <div class="text-xs text-gray-400 mb-3 flex items-center gap-1">
             预测元信息
             <el-tooltip placement="top">
@@ -531,12 +532,12 @@ const featureDescription = (name) => featureDescMap[name] || '—'
       </div>
 
       <!-- 双图区 -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- 三类概率分布 -->
-        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/30">
+        <div class="rounded-2xl border border-gray-800 bg-gray-900/30" style="padding: 20px 24px;">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-base font-semibold flex items-center gap-2">
-              <el-icon class="text-blue-400"><PieChart /></el-icon>
+              <el-icon class="text-amber-400"><PieChart /></el-icon>
               三类概率分布
             </h3>
             <span class="text-xs text-gray-500">和为 100%</span>
@@ -545,10 +546,10 @@ const featureDescription = (name) => featureDescMap[name] || '—'
         </div>
 
         <!-- Top 特征 -->
-        <div class="rounded-xl p-5 border border-gray-800 bg-gray-900/30">
+        <div class="rounded-2xl border border-gray-800 bg-gray-900/30" style="padding: 20px 24px;">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-base font-semibold flex items-center gap-2">
-              <el-icon class="text-cyan-400"><DataAnalysis /></el-icon>
+              <el-icon class="text-amber-400"><DataAnalysis /></el-icon>
               Top 8 关键特征
             </h3>
             <span class="text-xs text-gray-500">右侧为该股当前值</span>
@@ -558,8 +559,9 @@ const featureDescription = (name) => featureDescMap[name] || '—'
       </div>
 
       <!-- 特征详情表 -->
-      <div class="rounded-xl border border-gray-800 bg-gray-900/30">
-        <div class="px-5 py-3 border-b border-gray-800 text-base font-semibold">特征详情</div>
+      <div class="rounded-2xl border border-gray-800 bg-gray-900/30 overflow-hidden">
+        <div class="text-base font-semibold border-b border-gray-800" style="padding: 16px 24px;">特征详情</div>
+        <div style="padding: 12px 16px 16px;">
         <el-table :data="result.topFeatures" stripe size="small" :show-header="true">
           <el-table-column prop="name" label="特征名" width="200">
             <template #default="{ row }">
@@ -582,11 +584,12 @@ const featureDescription = (name) => featureDescMap[name] || '—'
             </template>
           </el-table-column>
         </el-table>
+        </div>
       </div>
 
       <!-- AI 智能分析报告 -->
-      <div class="rounded-xl border border-purple-900/40 bg-gradient-to-br from-purple-950/20 to-gray-900/30">
-        <div class="px-5 py-3 border-b border-purple-900/30 flex items-center justify-between flex-wrap gap-2">
+      <div class="rounded-2xl border border-purple-900/40 bg-gradient-to-br from-purple-950/20 to-gray-900/30 overflow-hidden">
+        <div class="border-b border-purple-900/30 flex items-center justify-between flex-wrap gap-2" style="padding: 16px 24px;">
           <h3 class="text-base font-semibold flex items-center gap-2">
             <el-icon class="text-purple-400"><ChatLineRound /></el-icon>
             AI 智能分析报告
@@ -595,31 +598,36 @@ const featureDescription = (name) => featureDescMap[name] || '—'
           <div class="flex items-center gap-2">
             <el-button
               v-if="!reportStreaming && !reportContent"
-              type="primary"
+              round
               size="small"
+              class="report-btn"
               @click="generateReport"
             >
-              <el-icon class="mr-1"><MagicStick /></el-icon>生成分析报告
+              生成分析报告
             </el-button>
             <el-button
               v-if="!reportStreaming && reportContent"
+              round
               size="small"
+              class="ghost-btn"
               @click="generateReport"
             >
-              <el-icon class="mr-1"><RefreshRight /></el-icon>重新生成
+              重新生成
             </el-button>
             <el-button
               v-if="!reportStreaming && reportContent"
+              round
               size="small"
+              class="ghost-btn"
               @click="copyReport"
             >
-              <el-icon class="mr-1"><DocumentCopy /></el-icon>复制
+              复制
             </el-button>
             <el-button
               v-if="reportStreaming"
+              round
               size="small"
-              type="danger"
-              plain
+              class="ghost-btn-danger"
               @click="stopReport"
             >
               停止生成
@@ -627,7 +635,7 @@ const featureDescription = (name) => featureDescMap[name] || '—'
           </div>
         </div>
 
-        <div class="p-5">
+        <div style="padding: 20px 24px;">
           <!-- 未生成时的占位 -->
           <div v-if="!reportContent && !reportStreaming && !reportError"
                class="text-center text-gray-500 py-8">
@@ -670,6 +678,92 @@ const featureDescription = (name) => featureDescMap[name] || '—'
 
 <style scoped>
 .font-mono { font-family: ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace; }
+
+/* 操作区圆滑风格 */
+.soft-input :deep(.el-input__wrapper) {
+  border-radius: 999px;
+  padding-left: 14px;
+  padding-right: 14px;
+  background: rgba(15, 23, 42, 0.6);
+  box-shadow: 0 0 0 1px rgba(71, 85, 105, 0.5) inset;
+}
+.soft-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.7) inset;
+}
+.quick-tag {
+  transition: all 0.2s ease;
+  padding: 0 12px;
+  height: 26px;
+  line-height: 26px;
+}
+.quick-tag:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+}
+
+/* 琥珀金主按钮 */
+.amber-btn {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  border: none !important;
+  color: #1f1300 !important;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 14px rgba(217, 119, 6, 0.35);
+  transition: all 0.2s ease;
+}
+.amber-btn:hover {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b) !important;
+  color: #1f1300 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(217, 119, 6, 0.45);
+}
+.amber-btn:active {
+  transform: translateY(0);
+}
+
+/* AI 报告区按钮 */
+.report-btn {
+  background: linear-gradient(135deg, #7c3aed, #4f46e5) !important;
+  border: none !important;
+  color: #fff !important;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 0 18px !important;
+  height: 30px;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
+  transition: all 0.2s ease;
+}
+.report-btn:hover {
+  background: linear-gradient(135deg, #8b5cf6, #6366f1) !important;
+  color: #fff !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.5);
+}
+.ghost-btn {
+  background: rgba(148, 163, 184, 0.08) !important;
+  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+  color: #cbd5e1 !important;
+  padding: 0 14px !important;
+  height: 30px;
+  transition: all 0.2s ease;
+}
+.ghost-btn:hover {
+  background: rgba(148, 163, 184, 0.18) !important;
+  border-color: rgba(148, 163, 184, 0.45) !important;
+  color: #f1f5f9 !important;
+}
+.ghost-btn-danger {
+  background: rgba(239, 68, 68, 0.1) !important;
+  border: 1px solid rgba(239, 68, 68, 0.4) !important;
+  color: #fca5a5 !important;
+  padding: 0 14px !important;
+  height: 30px;
+  transition: all 0.2s ease;
+}
+.ghost-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #fecaca !important;
+}
 
 /* AI 报告 markdown 排版（暗色主题） */
 .markdown-body { color: #cbd5e1; }
