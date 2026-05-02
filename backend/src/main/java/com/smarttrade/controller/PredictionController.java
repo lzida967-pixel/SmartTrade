@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -19,8 +20,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * LightGBM 实时预测网关：转发到外部 Python FastAPI 服务。
  *
  * 路径前缀：/prediction
- *   GET /prediction/lgbm/{code}   单只股票 T+5 三分类预测
- *   GET /prediction/health        预测服务健康状态
+ *   GET /prediction/lgbm/{code}             单只股票 T+5 三分类预测（?model=lgbm|xgb）
+ *   GET /prediction/health                  预测服务健康状态
  */
 @Slf4j
 @RestController
@@ -34,13 +35,15 @@ public class PredictionController {
     private PredictionReportService reportService;
 
     @GetMapping("/lgbm/{code}")
-    @AuditLog(category = "PREDICTION", action = "LGBM_PREDICT",
+    @AuditLog(category = "PREDICTION", action = "PREDICT",
             targetType = "STOCK", target = "#code",
-            summary = "LightGBM 预测 #{#code}",
-            includeArgs = {"code"})
-    public Result<PredictionDTO> predict(@PathVariable("code") String code) {
+            summary = "预测 #{#code} (model=#{#model})",
+            includeArgs = {"code", "model"})
+    public Result<PredictionDTO> predict(
+            @PathVariable("code") String code,
+            @RequestParam(value = "model", required = false, defaultValue = "lgbm") String model) {
         try {
-            PredictionDTO dto = predictionClient.predict(code);
+            PredictionDTO dto = predictionClient.predict(code, model);
             return Result.success(dto);
         } catch (IllegalArgumentException e) {
             return Result.error(400, e.getMessage());
@@ -63,7 +66,10 @@ public class PredictionController {
      * 审计记录改由 PredictionReportService 内部异步落库。
      */
     @GetMapping(value = "/lgbm/{code}/report", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter report(@PathVariable("code") String code, HttpServletResponse response) {
+    public SseEmitter report(
+            @PathVariable("code") String code,
+            @RequestParam(value = "model", required = false, defaultValue = "lgbm") String model,
+            HttpServletResponse response) {
         // 阻断中间链路（Tomcat / Vite proxy / Nginx 等）的 SSE 缓冲
         response.setHeader("Cache-Control", "no-cache, no-transform");
         response.setHeader("Connection", "keep-alive");
@@ -75,7 +81,7 @@ public class PredictionController {
         emitter.onTimeout(emitter::complete);
         emitter.onError(t -> log.debug("[Report] SSE 异常 code={}: {}", code, t.getMessage()));
 
-        reportService.streamReport(code, emitter);
+        reportService.streamReport(code, model, emitter);
         return emitter;
     }
 }

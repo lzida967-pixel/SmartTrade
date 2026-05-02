@@ -19,6 +19,14 @@ const route = useRoute()
 const userStore = useUserStore()
 // 支持从 URL query 读取股票代码（如 /prediction?code=600519）
 const codeInput = ref(route.query.code || '600519')
+const modelKey = ref('lgbm')  // 'lgbm' | 'xgb'
+const modelOptions = [
+  { value: 'lgbm', label: 'LightGBM', desc: '默认 / 快速' },
+  { value: 'xgb',  label: 'XGBoost',  desc: '另一种树模型' },
+]
+const currentModelLabel = computed(() =>
+  modelOptions.find(m => m.value === modelKey.value)?.label || 'LightGBM'
+)
 const loading = ref(false)
 const result = ref(null)
 const error = ref('')
@@ -96,7 +104,7 @@ const fetchPrediction = async () => {
   loading.value = true
   error.value = ''
   try {
-    const res = await request.get(`/prediction/lgbm/${code}`)
+    const res = await request.get(`/prediction/lgbm/${code}`, { params: { model: modelKey.value } })
     result.value = res.data
     await nextTick()
     renderProbaChart()
@@ -124,7 +132,7 @@ const generateReport = async () => {
   reportAbortCtrl = new AbortController()
 
   try {
-    const resp = await fetch(`/api/prediction/lgbm/${code}/report`, {
+    const resp = await fetch(`/api/prediction/lgbm/${code}/report?model=${modelKey.value}`, {
       method: 'GET',
       headers: {
         'Accept': 'text/event-stream',
@@ -263,7 +271,7 @@ const renderFeatureChart = () => {
         const f = feats[params[0].dataIndex]
         return `<div style="font-weight:600">${f.name}</div>
                 <div>当前值: <b>${formatValue(f.name, f.value)}</b></div>
-                <div>重要性: ${f.importance}</div>`
+                <div>重要性: ${formatImportance(f.importance)}</div>`
       }
     },
     xAxis: { type: 'value', show: false },
@@ -284,11 +292,19 @@ const renderFeatureChart = () => {
       },
       label: {
         show: true, position: 'right',
-        formatter: ({ dataIndex }) => formatValue(feats[dataIndex].name, feats[dataIndex].value),
-        color: '#94a3b8', fontSize: 11
+        formatter: ({ dataIndex }) => formatImportance(feats[dataIndex].importance),
+        color: '#fbbf24', fontSize: 11, fontWeight: 600
       }
     }]
   })
+}
+
+// 重要性格式化：XGBoost 返回 0~1 的浮点，LightGBM 返回整数 split 次数
+const formatImportance = (v) => {
+  if (v == null || Number.isNaN(v)) return '—'
+  const n = Number(v)
+  if (Math.abs(n) < 1) return n.toFixed(4)
+  return Math.round(n).toString()
 }
 
 // 特征值格式化
@@ -380,10 +396,10 @@ const featureDescription = (name) => featureDescMap[name] || '—'
       <h2 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
         <el-icon class="text-amber-400"><MagicStick /></el-icon>
         智能预测
-        <el-tag size="small" type="info">LightGBM · T+5</el-tag>
+        <el-tag size="small" type="info">{{ currentModelLabel }} · T+5</el-tag>
       </h2>
       <p class="text-sm text-gray-400 mt-1">
-        基于 35 维历史价量 + 基本面特征的 LightGBM 三分类模型，预测未来 5 个交易日涨跌幅区间
+        基于 35 维历史价量 + 基本面特征的 {{ currentModelLabel }} 三分类模型，预测未来 5 个交易日涨跌幅区间
       </p>
     </div>
 
@@ -403,6 +419,13 @@ const featureDescription = (name) => featureDescMap[name] || '—'
         开始预测
       </el-button>
       <el-divider direction="vertical" class="!mx-3" />
+      <span class="text-xs text-gray-500 mr-1">模型：</span>
+      <el-radio-group v-model="modelKey" size="small" class="model-switch">
+        <el-radio-button v-for="m in modelOptions" :key="m.value" :value="m.value">
+          {{ m.label }}
+        </el-radio-button>
+      </el-radio-group>
+      <el-divider direction="vertical" class="!mx-3" />
       <span class="text-xs text-gray-500 mr-1">常用：</span>
       <el-tag
         v-for="q in quickCodes" :key="q.code"
@@ -421,7 +444,7 @@ const featureDescription = (name) => featureDescMap[name] || '—'
     <!-- Loading 骨架屏 -->
     <div v-if="loading && !result" class="text-center py-20 text-gray-500">
       <el-icon class="animate-spin text-3xl"><Loading /></el-icon>
-      <div class="mt-3">正在调用 LightGBM 推理...</div>
+      <div class="mt-3">正在调用 {{ currentModelLabel }} 推理...</div>
     </div>
 
     <!-- 结果区 -->
@@ -552,7 +575,7 @@ const featureDescription = (name) => featureDescMap[name] || '—'
               <el-icon class="text-amber-400"><DataAnalysis /></el-icon>
               Top 8 关键特征
             </h3>
-            <span class="text-xs text-gray-500">右侧为该股当前值</span>
+            <span class="text-xs text-gray-500">柱长 = 模型重要性</span>
           </div>
           <div ref="featureChartRef" class="w-full h-[260px]"></div>
         </div>
@@ -580,7 +603,7 @@ const featureDescription = (name) => featureDescMap[name] || '—'
           </el-table-column>
           <el-table-column label="重要性" width="120" align="right">
             <template #default="{ row }">
-              <el-tag size="small" type="primary">{{ row.importance }}</el-tag>
+              <el-tag size="small" type="primary">{{ formatImportance(row.importance) }}</el-tag>
             </template>
           </el-table-column>
         </el-table>

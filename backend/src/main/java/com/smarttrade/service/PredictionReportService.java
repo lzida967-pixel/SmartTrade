@@ -43,8 +43,14 @@ public class PredictionReportService {
      * 调用方应保证 emitter 已配置好 onCompletion / onError。
      */
     public void streamReport(String stockCode, SseEmitter emitter) {
+        streamReport(stockCode, "lgbm", emitter);
+    }
+
+    public void streamReport(String stockCode, String modelKey, SseEmitter emitter) {
         // 启动时立即异步落一条审计日志（不阻塞 SSE）
         recordAudit(stockCode);
+
+        final String model = (modelKey == null || modelKey.isBlank()) ? "lgbm" : modelKey.toLowerCase();
 
         // 把整段流程放进新线程：预测调用 + prompt 构建 + Qwen 流式
         // 否则 predictionClient.predict() 是同步的，会阻塞 controller 返回 emitter，
@@ -53,13 +59,13 @@ public class PredictionReportService {
             Thread t = new Thread(r, "report-stream-" + stockCode);
             t.setDaemon(true);
             return t;
-        }).execute(() -> doStreamReport(stockCode, emitter));
+        }).execute(() -> doStreamReport(stockCode, model, emitter));
     }
 
-    private void doStreamReport(String stockCode, SseEmitter emitter) {
+    private void doStreamReport(String stockCode, String modelKey, SseEmitter emitter) {
         PredictionDTO dto;
         try {
-            dto = predictionClient.predict(stockCode);
+            dto = predictionClient.predict(stockCode, modelKey);
         } catch (Exception e) {
             sendError(emitter, "无法获取预测结果：" + e.getMessage());
             return;
@@ -106,7 +112,9 @@ public class PredictionReportService {
      */
     private String buildPrompt(PredictionDTO dto) {
         StringBuilder sb = new StringBuilder();
-        sb.append("你是一名资深的 A 股量化分析师。下面是机器学习模型（LightGBM 三分类）")
+        String modelDisplay = modelDisplayName(dto.getModelVersion());
+        sb.append("你是一名资深的 A 股量化分析师。下面是机器学习模型（")
+          .append(modelDisplay).append(" 三分类）")
           .append("对某只股票未来 ").append(dto.getForwardDays())
           .append(" 个交易日涨跌幅区间的预测结果，请你结合这些数据撰写一份**专业、结构化**的中文分析报告。\n\n");
 
@@ -146,7 +154,7 @@ public class PredictionReportService {
         sb.append("\n");
 
         sb.append("# 报告要求\n\n");
-        sb.append("请按以下 6 个小节结构输出报告，使用 Markdown 格式（标题用 `##`），全程中文。")
+        sb.append("请按以下 7 个小节结构输出报告，使用 Markdown 格式（标题用 `##`），全程中文。")
           .append("**重点是对模型输出做专业解读，不是简单复述数字**。\n\n");
 
         sb.append("## 1. 模型预测结果解读 ⭐（这一节最重要，必须详细）\n");
@@ -159,31 +167,38 @@ public class PredictionReportService {
           .append(pct1(dto.getConfidence())).append("%）属于高 / 中 / 低？\n");
         sb.append("- 距离随机基线（33.3%）多远？是否值得据此操作？\n\n");
         sb.append("**③ 特征驱动因素**（关键）\n");
-        sb.append("- 从 Top 特征表中，挑出 2-3 个**对当前结论贡献最大**的特征，逐一说明：\n");
-        sb.append("  - 这个特征当前是什么状态？（如 `ret_60d = -18%` 说明近 3 个月跌了 18%）\n");
-        sb.append("  - 它为什么推动模型给出 ")
-          .append(dto.getLabelName()).append(" 的判断？\n");
+        sb.append("- 总体说明哪 2-3 个特征对当前 ")
+          .append(dto.getLabelName()).append(" 结论贡献最大，后续第 2 节会逐个展开。\n");
         sb.append("- 是否存在**互相矛盾**的信号？（如动量看空但波动率收敛暗示底部）\n\n");
         sb.append("**④ 模型局限提示**\n");
         sb.append("- 该置信度水平下模型的历史准确率大约多少？\n");
         sb.append("- 哪些场景模型可能失效？（如政策黑天鹅、财报突变）\n\n");
 
-        sb.append("## 2. 综合判断\n");
+        sb.append("## 2. 关键特征逐个解读 ⭐（必须详细）\n");
+        sb.append("请**逐个**解释上方 Top 特征表中的**每一个**特征，使用二级标题 `### 特征名` 逐个展开，每个特征说明以下 4 点：\n\n");
+        sb.append("1. **含义**：这个指标是什么，怎么计算的（一句话）\n");
+        sb.append("2. **当前读数**：结合表中的值说明现在处于什么状态（如超卖/超买/中性、市场偏高/偏低等）\n");
+        sb.append("3. **传递什么信号**：这个数值在交易语境下意味着什么（如上涨动量衰竭、估值沫中周期高位等）\n");
+        sb.append("4. **对本次结论的贡献**：该特征是支持还是反对模型给出的「")
+          .append(dto.getLabelName()).append("」判断？贡献强还是弱？\n\n");
+        sb.append("要求：语言接地气，避免只复述公式；目标是**让不了解该指标的用户也能看懂**。\n\n");
+
+        sb.append("## 3. 综合判断\n");
         sb.append("基于上方解读，用 2-3 句话给出你**作为分析师**对此模型结论的态度：")
           .append("赞同 / 中立 / 谨慎，并简述理由。\n\n");
 
-        sb.append("## 3. 技术面解读\n");
+        sb.append("## 4. 技术面解读\n");
         sb.append("结合波动率、动量（ret_60d）、均线偏离、MACD/KDJ 等特征，")
           .append("分析当前所处的技术形态（趋势 / 整理 / 反转）。\n\n");
 
-        sb.append("## 4. 估值分析\n");
+        sb.append("## 5. 估值分析\n");
         sb.append("基于 PE-TTM / PB / PS 评估当前估值水平偏高、合理还是低估。")
           .append("如果 Top 特征里没有这些字段，本节可以一句话带过或跳过。\n\n");
 
-        sb.append("## 5. 主要风险\n");
+        sb.append("## 6. 主要风险\n");
         sb.append("列出 3-4 个潜在风险点，每点一句话。需结合模型输出（如低置信度本身就是风险）。\n\n");
 
-        sb.append("## 6. 操作建议\n");
+        sb.append("## 7. 操作建议\n");
         sb.append("给出具体建议（仓位 / 止损位 / 关注信号），强度需与置信度匹配：")
           .append("高置信可激进、低置信仅观察。**结尾必须明确写「以上仅供参考，不构成投资建议」**。\n\n");
 
@@ -191,13 +206,22 @@ public class PredictionReportService {
         sb.append("**写作要求**：\n");
         sb.append("- 每节简洁有力，不要堆砌空话\n");
         sb.append("- 必须基于上方表格的具体数据做判断，**不要泛泛而谈**\n");
-        sb.append("- 第 1 节是核心，至少占整篇报告的 40% 篇幅\n");
+        sb.append("- 第 1 、第 2 节是核心，加起来至少占整篇报告的 60% 篇幅\n");
         sb.append("- 数字可以引用，但要给出**解读**，不要只复述\n");
 
         return sb.toString();
     }
 
     // ------------ 工具函数 ------------
+
+    /** 将模型版本字符串映射为可读名称，如 lgbm_v1 -> LightGBM。 */
+    private static String modelDisplayName(String version) {
+        if (version == null) return "LightGBM";
+        String v = version.toLowerCase();
+        if (v.startsWith("xgb")) return "XGBoost";
+        if (v.startsWith("lgbm") || v.startsWith("lgb")) return "LightGBM";
+        return version;
+    }
 
     private static String pct0(double v) {
         return String.format(Locale.US, "%.0f", v * 100);

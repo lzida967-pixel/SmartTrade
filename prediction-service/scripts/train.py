@@ -3,13 +3,15 @@
 流程:
     1. 从 data/raw 构造数据集（特征+标签），保存到 data/processed/dataset.parquet
     2. 时间切分 train / val / test
-    3. 训练 LightGBM
+    3. 训练模型（LightGBM 或 XGBoost，可同时训两个）
     4. 在 test 集评估
-    5. 保存模型到 models/lgbm_v1.pkl
+    5. 保存模型到 models/{model}_v1.pkl
 
 用法:
-    python scripts/train.py
-    python scripts/train.py --rebuild-dataset    # 强制重建数据集
+    python scripts/train.py                       # 默认 LightGBM
+    python scripts/train.py --model xgb           # 只训 XGBoost
+    python scripts/train.py --model both          # 两个都训，便于横向对比
+    python scripts/train.py --rebuild-dataset     # 强制重建数据集
 """
 from __future__ import annotations
 
@@ -30,11 +32,19 @@ from app.features.dataset import (  # noqa: E402
     save_dataset,
     time_split,
 )
-from app.models import lgbm_model  # noqa: E402
+from app.models import lgbm_model, xgb_model  # noqa: E402
+
+
+MODEL_REGISTRY = {
+    "lgbm": ("LightGBM", lgbm_model),
+    "xgb":  ("XGBoost",  xgb_model),
+}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="训练 LightGBM 三分类模型")
+    parser = argparse.ArgumentParser(description="训练股票涨跌三分类模型")
+    parser.add_argument("--model", choices=["lgbm", "xgb", "both"], default="lgbm",
+                        help="选择训练模型: lgbm / xgb / both")
     parser.add_argument("--rebuild-dataset", action="store_true",
                         help="即使 dataset.parquet 已存在也强制重建")
     parser.add_argument("--val-days", type=int, default=60, help="验证集天数")
@@ -59,23 +69,38 @@ def main() -> int:
         logger.error("验证集或测试集为空，请检查数据时间范围")
         return 1
 
-    # 3. 训练
-    logger.info("=== 训练 LightGBM ===")
-    result = lgbm_model.train(train_df, val_df)
+    # 3-5. 逐个训练指定模型
+    targets = ["lgbm", "xgb"] if args.model == "both" else [args.model]
+    summary: dict[str, dict] = {}
+    for key in targets:
+        name, mod = MODEL_REGISTRY[key]
+        logger.info(f"=== 训练 {name} ===")
+        result = mod.train(train_df, val_df)
 
-    # 4. 测试集评估
-    logger.info("=== 测试集评估 ===")
-    X_test = test_df[result.feature_names].astype("float32")
-    y_test = test_df["label"].astype(int)
-    test_metrics = lgbm_model.evaluate(result.model, X_test, y_test, prefix="test")
-    result.metrics["test"] = test_metrics
+        logger.info(f"=== {name} 测试集评估 ===")
+        X_test = test_df[result.feature_names].astype("float32")
+        y_test = test_df["label"].astype(int)
+        test_metrics = mod.evaluate(result.model, X_test, y_test, prefix=f"{key}/test")
+        result.metrics["test"] = test_metrics
 
-    # 5. 保存
-    lgbm_model.save(result)
+        mod.save(result)
 
-    # 6. 特征重要性 Top 15
-    logger.info("=== 特征重要性 Top 15 ===")
-    print(result.feature_importance.head(15).to_string(index=False))
+        logger.info(f"=== {name} 特征重要性 Top 15 ===")
+        print(result.feature_importance.head(15).to_string(index=False))
+
+        summary[key] = {
+            "name": name,
+            "val_macro_f1": result.metrics.get("macro_f1"),
+            "test_macro_f1": test_metrics["macro_f1"],
+            "test_accuracy": test_metrics["accuracy"],
+        }
+
+    if len(summary) > 1:
+        logger.info("=== 模型横向对比（测试集）===")
+        for key, m in summary.items():
+            logger.info(
+                f"  {m['name']:<10} acc={m['test_accuracy']:.4f}  macro-F1={m['test_macro_f1']:.4f}"
+            )
 
     return 0
 

@@ -7,17 +7,19 @@ from loguru import logger
 
 from app.api.predict import router as predict_router
 from app.core.config import settings
-from app.services.prediction_service import load_model
+from app.services.prediction_service import MODEL_REGISTRY, load_model
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        load_model()
-    except FileNotFoundError as e:
-        logger.warning(f"模型未找到，预测接口将不可用: {e}")
-    except Exception as e:
-        logger.error(f"模型加载失败: {e}")
+    # 尝试预热所有已注册模型；任意一个缺失不阻断服务启动
+    for key in MODEL_REGISTRY:
+        try:
+            load_model(key)
+        except FileNotFoundError as e:
+            logger.warning(f"[{key}] 模型未找到，该模型接口将不可用: {e}")
+        except Exception as e:
+            logger.error(f"[{key}] 模型加载失败: {e}")
     yield
 
 

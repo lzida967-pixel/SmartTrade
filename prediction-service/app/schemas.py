@@ -14,7 +14,7 @@ class PredictionRequest(BaseModel):
 class FeatureContrib(BaseModel):
     name: str
     value: float
-    importance: int
+    importance: float
 
 
 class PredictionResponse(BaseModel):

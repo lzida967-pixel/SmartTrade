@@ -49,6 +49,6 @@ public class PredictionDTO {
     public static class FeatureContrib {
         private String name;
         private Double value;
-        private Integer importance;
+        private Double importance;
     }
 }

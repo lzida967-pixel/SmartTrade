@@ -32,12 +32,22 @@ public class PredictionClient {
     @Value("${smarttrade.prediction.cache-ttl-ms:60000}")
     private long cacheTtlMs;
 
+    private static final String DEFAULT_MODEL = "lgbm";
+    private static final java.util.Set<String> ALLOWED_MODELS = java.util.Set.of("lgbm", "xgb");
+
     private final Map<String, CachedEntry> cache = new ConcurrentHashMap<>();
 
     /**
-     * 单只股票预测。失败抛 IllegalStateException，调用方决定如何兜底。
+     * 单只股票预测（默认 LightGBM）。
      */
     public PredictionDTO predict(String stockCode) {
+        return predict(stockCode, DEFAULT_MODEL);
+    }
+
+    /**
+     * 单只股票预测，可指定模型 key（lgbm / xgb）。失败抛 IllegalStateException。
+     */
+    public PredictionDTO predict(String stockCode, String modelKey) {
         if (!enabled) {
             throw new IllegalStateException("预测服务已禁用");
         }
@@ -45,21 +55,26 @@ public class PredictionClient {
         if (code.length() != 6 || !code.chars().allMatch(Character::isDigit)) {
             throw new IllegalArgumentException("股票代码必须是 6 位数字: " + stockCode);
         }
+        String model = (modelKey == null || modelKey.isBlank()) ? DEFAULT_MODEL : modelKey.toLowerCase();
+        if (!ALLOWED_MODELS.contains(model)) {
+            throw new IllegalArgumentException("不支持的模型: " + modelKey + "，可选: " + ALLOWED_MODELS);
+        }
 
-        // 命中缓存
-        CachedEntry hit = cache.get(code);
+        // 命中缓存（按 model+code 区分）
+        String cacheKey = model + ":" + code;
+        CachedEntry hit = cache.get(cacheKey);
         long now = System.currentTimeMillis();
         if (hit != null && (now - hit.timestamp) < cacheTtlMs) {
             return hit.value;
         }
 
-        String url = baseUrl + "/predict/" + code;
+        String url = baseUrl + "/predict/" + code + "?model=" + model;
         try {
             PredictionDTO dto = restTemplate.getForObject(url, PredictionDTO.class);
             if (dto == null) {
                 throw new IllegalStateException("预测服务返回空响应");
             }
-            cache.put(code, new CachedEntry(now, dto));
+            cache.put(cacheKey, new CachedEntry(now, dto));
             return dto;
         } catch (RestClientException e) {
             log.warn("[Prediction] 调用 {} 失败: {}", url, e.getMessage());
