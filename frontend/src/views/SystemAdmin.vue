@@ -76,7 +76,7 @@
         </div>
       </header>
 
-      <div class="p-6">
+      <div class="admin-page-wrap">
         <router-view />
       </div>
     </main>
@@ -197,6 +197,14 @@ const logout = () => {
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 4px 24px -8px rgba(0, 0, 0, 0.4);
+  padding: 18px 20px;
+}
+/* 内嵌完整的标题栏（带分割线）时，让标题贴合卡片边缘，由 .admin-card-title 自带 padding */
+.admin-card:has(> .admin-card-title) {
+  padding: 0;
+}
+.admin-card:has(> .admin-card-title) > :not(.admin-card-title) {
+  padding: 16px 20px;
 }
 .admin-card-title {
   display: flex;
@@ -433,4 +441,21 @@ const logout = () => {
 }
 .el-overlay-dialog .el-dialog__title { color: #f3f4f6; }
 .el-overlay-dialog .el-dialog__body { color: #d1d5db; }
+
+/* ============== 后台页面统一容器 ============== */
+.admin-page-wrap {
+  padding: 15px;
+}
+/* router-view 渲染出来的页面根 div */
+.admin-page-wrap > div {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+/* 抵消页面内已有的 mb-* 等向下间距，避免与 gap 叠加 */
+.admin-page-wrap > div > .mb-4,
+.admin-page-wrap > div > .mb-6,
+.admin-page-wrap > div > .admin-page-title {
+  margin-bottom: 0;
+}
 </style>

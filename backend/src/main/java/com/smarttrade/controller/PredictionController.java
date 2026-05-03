@@ -4,6 +4,7 @@ import com.smarttrade.annotation.AuditLog;
 import com.smarttrade.common.Result;
 import com.smarttrade.dto.PredictionDTO;
 import com.smarttrade.service.PredictionClient;
+import com.smarttrade.service.PredictionLogService;
 import com.smarttrade.service.PredictionReportService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,9 @@ public class PredictionController {
     @Autowired
     private PredictionReportService reportService;
 
+    @Autowired
+    private PredictionLogService predictionLogService;
+
     @GetMapping("/lgbm/{code}")
     @AuditLog(category = "PREDICTION", action = "PREDICT",
             targetType = "STOCK", target = "#code",
@@ -44,6 +48,8 @@ public class PredictionController {
             @RequestParam(value = "model", required = false, defaultValue = "lgbm") String model) {
         try {
             PredictionDTO dto = predictionClient.predict(code, model);
+            // 异步落库，供后续准确率回看
+            predictionLogService.saveAsync(dto);
             return Result.success(dto);
         } catch (IllegalArgumentException e) {
             return Result.error(400, e.getMessage());

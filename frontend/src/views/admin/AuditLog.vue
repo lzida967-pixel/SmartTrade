@@ -239,6 +239,7 @@ const categoryTagType = (c) => {
     case 'ADMIN_USER':   return 'warning'
     case 'ADMIN_STOCK':  return 'warning'
     case 'ADMIN_ORDER':  return 'danger'
+    case 'PREDICTION':   return 'primary'
     default:             return ''
   }
 }

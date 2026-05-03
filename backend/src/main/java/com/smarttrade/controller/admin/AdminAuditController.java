@@ -60,7 +60,8 @@ public class AdminAuditController {
                 opt("ACCOUNT",      "账户"),
                 opt("ADMIN_USER",   "管理-用户"),
                 opt("ADMIN_STOCK",  "管理-股票"),
-                opt("ADMIN_ORDER",  "管理-订单")
+                opt("ADMIN_ORDER",  "管理-订单"),
+                opt("PREDICTION",   "AI 预测")
         );
         List<Map<String, String>> actions = Arrays.asList(
                 opt("LOGIN",                "登录"),
@@ -75,7 +76,9 @@ public class AdminAuditController {
                 opt("DELETE_STOCK",         "删除股票"),
                 opt("TRIGGER_SYNC_ALL",     "触发全量同步"),
                 opt("TRIGGER_SYNC_MISSING", "触发缺失同步"),
-                opt("FORCE_CANCEL",         "强制撤单")
+                opt("FORCE_CANCEL",         "强制撤单"),
+                opt("PREDICT",              "AI 预测"),
+                opt("VERIFY_PREDICTION",    "校验预测")
         );
         List<Map<String, String>> results = Arrays.asList(
                 opt("SUCCESS", "成功"),

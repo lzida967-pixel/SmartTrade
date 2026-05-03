@@ -32,7 +32,7 @@
         <div>
           <div class="stat-label">用户可用资金合计</div>
           <div class="stat-value" style="color:#60a5fa">¥{{ formatNum(data.user?.availableFundsSum) }}</div>
-          <div class="text-[11px] text-gray-500 mt-1">来源：所有用户 availableFunds 之和</div>
+          <div class="text-[11px] text-gray-500 mt-1">来源：所有用户可用资金之和</div>
         </div>
       </div>
 
@@ -104,6 +104,60 @@
       </div>
     </div>
 
+    <!-- AI 模型准确率 -->
+    <div class="admin-card p-5">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div class="text-sm text-gray-200 font-medium flex items-center gap-2">
+          <el-icon class="text-purple-400"><MagicStick /></el-icon>
+          AI 模型近 {{ statsDays }} 天准确率
+          <span class="text-[11px] text-gray-500">（T+5 三分类，随机基线 33.3%）</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <el-select v-model="statsDays" size="small" class="!w-24" @change="loadStats">
+            <el-option :value="7"  label="近 7 天" />
+            <el-option :value="30" label="近 30 天" />
+            <el-option :value="90" label="近 90 天" />
+          </el-select>
+          <el-button size="small" :loading="verifying" @click="verifyPredictions">
+            <el-icon class="mr-1"><Check /></el-icon>立即校验
+          </el-button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div v-for="m in stats" :key="m.modelVersion" class="model-stat-card">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <span class="model-badge" :class="m.modelVersion.startsWith('xgb') ? 'xgb' : 'lgbm'">
+                {{ m.modelName }}
+              </span>
+              <span class="text-[11px] text-gray-500 font-mono">{{ m.modelVersion }}</span>
+            </div>
+            <span v-if="m.verifiedCount > 0"
+                  class="text-[11px]"
+                  :class="Number(m.accuracy) >= 0.4 ? 'text-emerald-300' : 'text-amber-300'">
+              {{ Number(m.accuracy) >= 0.4 ? '表现良好' : '谨慎参考' }}
+            </span>
+          </div>
+          <div class="flex items-baseline gap-2">
+            <span class="text-3xl font-bold" :style="{ color: accColor(m.accuracy) }">
+              {{ (Number(m.accuracy) * 100).toFixed(1) }}%
+            </span>
+            <span class="text-xs text-gray-500">准确率</span>
+          </div>
+          <div class="text-[11px] text-gray-500 mt-2 flex items-center gap-3">
+            <span>已核对 <span class="text-gray-300">{{ m.verifiedCount }}</span></span>
+            <span>命中 <span class="text-emerald-300">{{ m.correctCount }}</span></span>
+            <span>待校验 <span class="text-amber-300">{{ m.pendingCount }}</span></span>
+          </div>
+          <!-- 进度条 -->
+          <div class="mt-3 h-1 rounded-full bg-white/5 overflow-hidden">
+            <div class="h-full transition-all"
+                 :style="{ width: (Number(m.accuracy) * 100) + '%', background: accColor(m.accuracy) }"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 底部：最近订单列表 -->
     <div class="admin-card p-4">
       <div class="flex items-center justify-between mb-3 px-1">
@@ -168,8 +222,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import {
-  Odometer, Refresh, User, Wallet, Coin, List, TrendCharts, Warning, Clock
+  Odometer, Refresh, User, Wallet, Coin, List, TrendCharts, Warning, Clock,
+  MagicStick, Check
 } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import request from '../../utils/request'
 
@@ -177,6 +233,49 @@ const data = ref({})
 const loading = ref(false)
 const trendRef = ref(null)
 let chart = null
+
+// === AI 模型准确率 ===
+const stats = ref([])
+const statsDays = ref(30)
+const verifying = ref(false)
+
+const accColor = (acc) => {
+  const v = Number(acc) || 0
+  if (v >= 0.5) return '#10b981'
+  if (v >= 0.4) return '#22c55e'
+  if (v >= 0.33) return '#f59e0b'
+  return '#ef4444'
+}
+
+const loadStats = async () => {
+  try {
+    const res = await request.get('/admin/prediction/stats', { params: { days: statsDays.value } })
+    if (res.code === 200) stats.value = res.data || []
+  } catch (_) { /* ignore */ }
+}
+
+const verifyPredictions = async () => {
+  verifying.value = true
+  try {
+    const res = await request.post('/admin/prediction/verify')
+    if (res.code === 200) {
+      const n = res.data?.verifiedCount || 0
+      const pending = (stats.value || []).reduce((s, m) => Math.max(s, m.pendingCount || 0), 0)
+      if (n > 0) {
+        ElMessage.success(`成功校验 ${n} 条预测`)
+      } else if (pending > 0) {
+        ElMessage.info(`${pending} 条预测均未到 T+5，暂无法校验（请等待行情同步后再试）`)
+      } else {
+        ElMessage.info('没有待校验的条目')
+      }
+      await loadStats()
+    }
+  } catch (e) {
+    ElMessage.error('校验失败：' + (e?.response?.data?.msg || e.message))
+  } finally {
+    verifying.value = false
+  }
+}
 
 const trendTotal = computed(() =>
   (data.value.orderTrend || []).reduce((acc, p) => acc + Number(p.count || 0), 0)
@@ -245,6 +344,7 @@ const onResize = () => chart && chart.resize()
 
 onMounted(() => {
   reload()
+  loadStats()
   window.addEventListener('resize', onResize)
 })
 onUnmounted(() => {
@@ -254,3 +354,34 @@ onUnmounted(() => {
 
 watch(() => data.value.orderTrend, () => nextTick(renderChart))
 </script>
+
+<style scoped>
+.model-stat-card {
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.06), rgba(255,255,255,0.02));
+  border: 1px solid rgba(139, 92, 246, 0.18);
+  transition: border-color .2s, transform .2s;
+}
+.model-stat-card:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  transform: translateY(-1px);
+}
+.model-badge {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.model-badge.lgbm {
+  background: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+.model-badge.xgb {
+  background: rgba(236, 72, 153, 0.15);
+  color: #f9a8d4;
+  border: 1px solid rgba(236, 72, 153, 0.3);
+}
+</style>
