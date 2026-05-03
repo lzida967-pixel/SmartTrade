@@ -78,6 +78,8 @@ public class AdminAuditController {
                 opt("TRIGGER_SYNC_MISSING", "触发缺失同步"),
                 opt("FORCE_CANCEL",         "强制撤单"),
                 opt("PREDICT",              "AI 预测"),
+                opt("LGBM_REPORT",          "AI 分析报告"),
+                opt("COMPARE_REPORT",       "AI 分歧解读"),
                 opt("VERIFY_PREDICTION",    "校验预测")
         );
         List<Map<String, String>> results = Arrays.asList(

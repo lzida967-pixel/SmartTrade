@@ -90,4 +90,26 @@ public class PredictionController {
         reportService.streamReport(code, model, emitter);
         return emitter;
     }
+
+    /**
+     * 并行调用 LightGBM + XGBoost，生成「模型分歧解读」流式报告。
+     * 与单模型报告共享 SSE 事件协议（delta/error/done）。
+     */
+    @GetMapping(value = "/compare/{code}/report", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter compareReport(
+            @PathVariable("code") String code,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-cache, no-transform");
+        response.setHeader("Connection", "keep-alive");
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setCharacterEncoding("UTF-8");
+
+        SseEmitter emitter = new SseEmitter(0L);
+        emitter.onCompletion(() -> log.debug("[Compare] SSE 完成 code={}", code));
+        emitter.onTimeout(emitter::complete);
+        emitter.onError(t -> log.debug("[Compare] SSE 异常 code={}: {}", code, t.getMessage()));
+
+        reportService.streamCompareReport(code, emitter);
+        return emitter;
+    }
 }

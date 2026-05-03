@@ -40,6 +40,11 @@ const routes = [
     component: () => import('../views/Prediction.vue')
   },
   {
+    path: '/prediction/compare',
+    name: 'PredictionCompare',
+    component: () => import('../views/PredictionCompare.vue')
+  },
+  {
     path: '/admin',
     component: () => import('../views/SystemAdmin.vue'),
     meta: { requireAdmin: true, hideLayout: true },

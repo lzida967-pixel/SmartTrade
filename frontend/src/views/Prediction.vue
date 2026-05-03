@@ -7,7 +7,7 @@
  *   -> Python FastAPI (LightGBM 推理) -> 返回三类概率 + Top 特征
  */
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
@@ -16,7 +16,9 @@ import request from '../utils/request'
 import { useUserStore } from '../stores/user'
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
+const goCompare = () => router.push({ path: '/prediction/compare', query: { code: codeInput.value } })
 // 支持从 URL query 读取股票代码（如 /prediction?code=600519）
 const codeInput = ref(route.query.code || '600519')
 const modelKey = ref('lgbm')  // 'lgbm' | 'xgb'
@@ -292,7 +294,7 @@ const renderFeatureChart = () => {
       },
       label: {
         show: true, position: 'right',
-        formatter: ({ dataIndex }) => formatImportance(feats[dataIndex].importance),
+        formatter: ({ dataIndex }) => formatValue(feats[dataIndex].name, feats[dataIndex].value),
         color: '#fbbf24', fontSize: 11, fontWeight: 600
       }
     }]
@@ -425,6 +427,9 @@ const featureDescription = (name) => featureDescMap[name] || '—'
           {{ m.label }}
         </el-radio-button>
       </el-radio-group>
+      <el-button size="small" round plain class="compare-btn" @click="goCompare">
+        <el-icon class="mr-1"><Connection /></el-icon>对比模式
+      </el-button>
       <el-divider direction="vertical" class="!mx-3" />
       <span class="text-xs text-gray-500 mr-1">常用：</span>
       <el-tag
@@ -575,7 +580,7 @@ const featureDescription = (name) => featureDescMap[name] || '—'
               <el-icon class="text-amber-400"><DataAnalysis /></el-icon>
               Top 8 关键特征
             </h3>
-            <span class="text-xs text-gray-500">柱长 = 模型重要性</span>
+            <span class="text-xs text-gray-500">柱长 = 模型重要性 · 右侧 = 当前值</span>
           </div>
           <div ref="featureChartRef" class="w-full h-[260px]"></div>
         </div>

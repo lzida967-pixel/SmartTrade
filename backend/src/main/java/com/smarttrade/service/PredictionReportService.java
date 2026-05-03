@@ -79,6 +79,64 @@ public class PredictionReportService {
         aiChatService.streamChat(List.of(userMsg), emitter);
     }
 
+    /**
+     * 并行拉 LGBM + XGB 结果，生成「分歧解读」报告。
+     */
+    public void streamCompareReport(String stockCode, SseEmitter emitter) {
+        recordCompareAudit(stockCode);
+        Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "compare-report-" + stockCode);
+            t.setDaemon(true);
+            return t;
+        }).execute(() -> doStreamCompareReport(stockCode, emitter));
+    }
+
+    private void doStreamCompareReport(String stockCode, SseEmitter emitter) {
+        PredictionDTO lgbm, xgb;
+        try {
+            lgbm = predictionClient.predict(stockCode, "lgbm");
+        } catch (Exception e) {
+            sendError(emitter, "LightGBM 调用失败：" + e.getMessage());
+            return;
+        }
+        try {
+            xgb = predictionClient.predict(stockCode, "xgb");
+        } catch (Exception e) {
+            sendError(emitter, "XGBoost 调用失败：" + e.getMessage());
+            return;
+        }
+
+        String prompt = buildComparePrompt(lgbm, xgb);
+        log.info("[Compare] 为 {} 生成分歧解读，prompt {} 字", stockCode, prompt.length());
+
+        Map<String, String> userMsg = Map.of("role", "user", "content", prompt);
+        aiChatService.streamChat(List.of(userMsg), emitter);
+    }
+
+    private void recordCompareAudit(String stockCode) {
+        try {
+            Long userId = UserContext.getUserId();
+            String username = null;
+            String role = "GUEST";
+            if (userId != null) {
+                try {
+                    User u = userService.getById(userId);
+                    if (u != null) { username = u.getUsername(); role = u.getRole(); }
+                } catch (Exception ignore) {}
+            }
+            Map<String, Object> details = new HashMap<>();
+            details.put("code", stockCode);
+            auditLogService.record(
+                    "PREDICTION", "COMPARE_REPORT",
+                    userId, username, role,
+                    "STOCK", stockCode,
+                    "AI 分歧解读 " + stockCode,
+                    details, true, null);
+        } catch (Exception e) {
+            log.warn("[Compare] 审计日志写入失败: {}", e.getMessage());
+        }
+    }
+
     /** 异步记审计，不阻塞主流程。失败仅打印日志。 */
     private void recordAudit(String stockCode) {
         try {
@@ -210,6 +268,111 @@ public class PredictionReportService {
         sb.append("- 数字可以引用，但要给出**解读**，不要只复述\n");
 
         return sb.toString();
+    }
+
+    /**
+     * 并行 LGBM + XGB 两份预测结果 → 分歧解读 prompt。
+     */
+    private String buildComparePrompt(PredictionDTO a, PredictionDTO b) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("你是一名资深的 A 股量化分析师。")
+          .append("下面是两个不同的机器学习模型（LightGBM 与 XGBoost）对同一只股票、同一基准日、同一目标周期的 T+")
+          .append(a.getForwardDays())
+          .append(" 三分类预测结果。请你基于两者的差异，")
+          .append("撰写一份**专业、结构化**的「模型分歧解读」中文报告。\n\n");
+
+        sb.append("# 输入数据\n\n");
+        sb.append("- 股票代码：`").append(a.getCode()).append("`\n");
+        sb.append("- 基准日期：").append(a.getAsOfDate()).append("\n");
+        sb.append("- 预测周期：T+").append(a.getForwardDays()).append(" 个交易日\n");
+        sb.append("- 分类阈值：±").append(pct0(a.getThreshold())).append("%\n\n");
+
+        // 概率并排表
+        sb.append("## 两模型三类概率并排\n\n");
+        Map<String, Double> pa = a.getProba();
+        Map<String, Double> pb = b.getProba();
+        sb.append("| 类别 | LightGBM | XGBoost | 差值 |\n|---|---|---|---|\n");
+        appendProbaRow(sb, "看多", pa.getOrDefault("bullish", 0.0), pb.getOrDefault("bullish", 0.0));
+        appendProbaRow(sb, "震荡", pa.getOrDefault("neutral", 0.0), pb.getOrDefault("neutral", 0.0));
+        appendProbaRow(sb, "看空", pa.getOrDefault("bearish", 0.0), pb.getOrDefault("bearish", 0.0));
+        sb.append("\n");
+
+        // 结论
+        sb.append("## 两模型结论\n\n");
+        sb.append("- **LightGBM**：").append(a.getLabelName())
+          .append("，置信度 ").append(pct1(a.getConfidence())).append("%\n");
+        sb.append("- **XGBoost**：").append(b.getLabelName())
+          .append("，置信度 ").append(pct1(b.getConfidence())).append("%\n");
+        boolean sameLabel = a.getLabel() != null && a.getLabel().equals(b.getLabel());
+        sb.append("- **标签一致性**：").append(sameLabel ? "✅ 方向一致" : "❌ 方向不一致").append("\n");
+        double confGap = Math.abs(a.getConfidence() - b.getConfidence());
+        sb.append("- **置信度差**：").append(pct1(confGap)).append("%\n\n");
+
+        // Top 特征：共同 vs 独有
+        java.util.Set<String> fa = new java.util.LinkedHashSet<>();
+        java.util.Set<String> fb = new java.util.LinkedHashSet<>();
+        if (a.getTopFeatures() != null) a.getTopFeatures().forEach(f -> fa.add(f.getName()));
+        if (b.getTopFeatures() != null) b.getTopFeatures().forEach(f -> fb.add(f.getName()));
+        java.util.Set<String> shared = new java.util.LinkedHashSet<>(fa); shared.retainAll(fb);
+        java.util.Set<String> onlyA  = new java.util.LinkedHashSet<>(fa); onlyA.removeAll(fb);
+        java.util.Set<String> onlyB  = new java.util.LinkedHashSet<>(fb); onlyB.removeAll(fa);
+
+        sb.append("## Top 特征对比\n\n");
+        sb.append("- **两模型共同看重**（").append(shared.size()).append(" 项）：");
+        sb.append(shared.isEmpty() ? "无" : String.join("、", shared.stream().map(n -> "`" + n + "`").toList()));
+        sb.append("\n- **仅 LightGBM 看重**：");
+        sb.append(onlyA.isEmpty() ? "无" : String.join("、", onlyA.stream().map(n -> "`" + n + "`").toList()));
+        sb.append("\n- **仅 XGBoost 看重**：");
+        sb.append(onlyB.isEmpty() ? "无" : String.join("、", onlyB.stream().map(n -> "`" + n + "`").toList()));
+        sb.append("\n\n");
+
+        // 共同特征当前值（两边相同，用 a 的值即可）
+        if (!shared.isEmpty() && a.getTopFeatures() != null) {
+            sb.append("### 共同特征当前值\n\n");
+            sb.append("| 特征 | 含义 | 当前值 |\n|---|---|---|\n");
+            for (PredictionDTO.FeatureContrib f : a.getTopFeatures()) {
+                if (shared.contains(f.getName())) {
+                    sb.append("| `").append(f.getName()).append("` | ")
+                      .append(featureMeaning(f.getName())).append(" | ")
+                      .append(formatFeatureValue(f.getName(), f.getValue())).append(" |\n");
+                }
+            }
+            sb.append("\n");
+        }
+
+        sb.append("# 报告要求\n\n");
+        sb.append("请按以下 5 个小节输出报告，使用 Markdown（`##` 标题），全程中文，**不要复述输入表格数字**，重在**专业解读**。\n\n");
+
+        sb.append("## 1. 分歧定性\n");
+        sb.append("用一句话判断当前属于：**强共识 / 方向一致 / 温和分歧 / 显著分歧**，并简述依据（结合标签一致性、置信度差、概率分布相似度）。\n\n");
+
+        sb.append("## 2. 分歧原因分析 ⭐（重点，至少 200 字）\n");
+        sb.append("- 两个模型的原理差异：LightGBM 基于直方图 + leaf-wise，XGBoost 基于预排序 + level-wise，对特征的敏感度不同\n");
+        sb.append("- 结合**共同特征**与**独有特征**，解释为什么两模型可能看法不一：\n");
+        sb.append("    - 共同特征读数暗示了什么？\n");
+        sb.append("    - 各自独有的特征说明它们关注了什么对方没关注的信息？\n");
+        sb.append("- 当前市场环境（震荡、趋势、高波动）下，哪个模型更容易误判？\n\n");
+
+        sb.append("## 3. 该听谁的？\n");
+        sb.append("明确给出一个倾向性判断（**倾向 LightGBM / 倾向 XGBoost / 建议观望**），并说明理由：\n");
+        sb.append("- 置信度高的不一定更对，结合特征分布合理性判断\n");
+        sb.append("- 如果两者分歧太大，直接建议观望，不要强行跟单\n\n");
+
+        sb.append("## 4. 操作建议\n");
+        sb.append("针对「").append(sameLabel ? "方向一致但强度不同" : "方向冲突")
+          .append("」的场景，给出具体仓位建议（重仓 / 轻仓 / 观望 / 分批）、止损位参考、需要关注的后续信号。\n\n");
+
+        sb.append("## 5. 风险提示\n");
+        sb.append("2-3 句话，结尾必须包含「以上仅供参考，不构成投资建议」。\n");
+
+        return sb.toString();
+    }
+
+    private static void appendProbaRow(StringBuilder sb, String name, double a, double b) {
+        sb.append("| ").append(name).append(" | ")
+          .append(pct1(a)).append("% | ")
+          .append(pct1(b)).append("% | ")
+          .append(String.format(Locale.US, "%+.1f", (a - b) * 100)).append("% |\n");
     }
 
     // ------------ 工具函数 ------------
