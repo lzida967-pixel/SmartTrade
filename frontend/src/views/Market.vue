@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen bg-[#030305] text-gray-200 font-sans selection:bg-blue-500/30">
-    <main class="p-6 max-w-[1600px] mx-auto space-y-6">
+    <main class="max-w-[1600px] mx-auto" style="padding: 15px 15px; display: flex; flex-direction: column; gap: 15px;">
 
       <!-- 顶部页签 -->
       <div class="flex items-center justify-between flex-wrap gap-3">

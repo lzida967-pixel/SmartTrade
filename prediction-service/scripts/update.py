@@ -3,11 +3,13 @@
 依次执行:
     1. 删掉旧 parquet（可选 --keep-cache 跳过）
     2. 全量重拉行情数据（baostock）
-    3. 重建数据集 + 重训 LightGBM 模型
+    3. 重建数据集 + 重训模型（默认同时训 lgbm+xgb）
     4. 通知运行中的 FastAPI 服务热重载（可选）
 
 用法:
-    python scripts/update.py                       # 全量更新
+    python scripts/update.py                       # 全量更新，两个模型都重训
+    python scripts/update.py --model lgbm          # 只重训 LightGBM
+    python scripts/update.py --model xgb           # 只重训 XGBoost
     python scripts/update.py --keep-cache          # 不删旧 parquet（增量补缺失股票）
     python scripts/update.py --no-reload           # 不调用 FastAPI reload 接口
     python scripts/update.py --reload-url http://...  # 自定义 reload 地址
@@ -86,6 +88,8 @@ def reload_fastapi(url: str, retries: int = 2) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="一键更新预测模型")
+    parser.add_argument("--model", choices=["lgbm", "xgb", "both"], default="both",
+                        help="重训哪些模型，默认 both")
     parser.add_argument("--keep-cache", action="store_true",
                         help="不删除旧 parquet（增量补缺失股票）")
     parser.add_argument("--no-reload", action="store_true",
@@ -114,8 +118,8 @@ def main() -> int:
     run_subprocess([PYTHON, "scripts/fetch_data.py", "--sleep", str(args.sleep)])
 
     # 3. 重训模型
-    step("Step 3/3  重建数据集 + 训练模型")
-    run_subprocess([PYTHON, "scripts/train.py", "--rebuild-dataset"])
+    step(f"Step 3/3  重建数据集 + 训练模型 (--model {args.model})")
+    run_subprocess([PYTHON, "scripts/train.py", "--rebuild-dataset", "--model", args.model])
 
     elapsed = time.time() - t0
     logger.info(f"\n✅ 模型更新完成，总耗时 {elapsed/60:.1f} 分钟")
