@@ -30,4 +30,43 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * SSE 流式任务专用线程池（AI 报告、AI 聊天、分歧解读共用）。
+     * 替代之前各 Service 里每次调用都 new Executors.newSingleThreadExecutor() 的泄漏写法。
+     * 每个任务都是长阻塞（调 FastAPI / 流式调 Qwen），所以给较大池 + 较小队列，超载 CallerRuns 背压。
+     */
+    @Bean("sseStreamExecutor")
+    public Executor sseStreamExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(32);
+        executor.setKeepAliveSeconds(120);
+        executor.setThreadNamePrefix("sse-stream-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * 预测日志 / 轻量持久化异步池。用于 predict_log 异步落库等场景。
+     * 写操作快，用较小池即可；队列稍大防丢。
+     */
+    @Bean("persistenceExecutor")
+    public Executor persistenceExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(1000);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("persist-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(10);
+        executor.initialize();
+        return executor;
+    }
 }

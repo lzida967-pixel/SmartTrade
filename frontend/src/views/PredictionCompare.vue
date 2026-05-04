@@ -19,22 +19,32 @@ import * as echarts from 'echarts'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import request from '../utils/request'
-import { useUserStore } from '../stores/user'
+import { labelMeta, formatValue } from '../utils/predictionFormat'
+import { usePredictionSse } from '../composables/usePredictionSse'
 
 const route = useRoute()
 const router = useRouter()
-const userStore = useUserStore()
 
 const codeInput = ref(route.query.code || '600519')
 const loading = ref(false)
 const error = ref('')
 const results = ref({ lgbm: null, xgb: null })
 
-// AI 解读分歧 - 流式报告状态
-const reportContent = ref('')
-const reportStreaming = ref(false)
-const reportError = ref('')
-let reportAbortCtrl = null
+// AI 解读分歧（复用单预测页的 usePredictionSse composable）
+const reportSse = usePredictionSse({
+  buildUrl: (code) => `/api/prediction/compare/${code}/report`,
+  errorHint: 'AI 分歧解读失败',
+  onBeforeStart: () => {
+    if (!results.value.lgbm || !results.value.xgb) {
+      ElMessage.warning('请先完成两个模型的预测')
+      return false
+    }
+  }
+})
+const { content: reportContent, streaming: reportStreaming, errorMsg: reportError } = reportSse
+const generateCompareReport = () => reportSse.start(results.value.lgbm?.code)
+const stopReport = () => reportSse.stop()
+const copyReport = () => reportSse.copy()
 
 marked.setOptions({ breaks: true, gfm: true })
 const renderMarkdown = (text) => {
@@ -51,12 +61,6 @@ const quickCodes = [
   { code: '601899', name: '紫金矿业' },
   { code: '600036', name: '招商银行' }
 ]
-
-const labelMeta = {
-  0: { name: '看多', color: '#ef4444', bg: 'rgba(239,68,68,.10)', icon: '↑' },
-  1: { name: '震荡', color: '#94a3b8', bg: 'rgba(148,163,184,.10)', icon: '—' },
-  2: { name: '看空', color: '#10b981', bg: 'rgba(16,185,129,.10)', icon: '↓' }
-}
 
 const modelMeta = {
   lgbm: { name: 'LightGBM', badge: '#60a5fa', accent: 'rgba(96,165,250,.35)' },
@@ -99,88 +103,7 @@ const selectQuick = (c) => { codeInput.value = c; fetchCompare() }
 const goSingle = () => router.push({ path: '/prediction', query: { code: codeInput.value } })
 
 // 切换股票时清空上一次的 AI 分歧解读
-watch(codeInput, () => {
-  stopReport()
-  reportContent.value = ''
-  reportError.value = ''
-})
-
-// ---------- AI 解读分歧 (SSE) ----------
-const generateCompareReport = async () => {
-  if (!results.value.lgbm || !results.value.xgb) {
-    ElMessage.warning('请先完成两个模型的预测')
-    return
-  }
-  if (reportStreaming.value) return
-
-  const code = results.value.lgbm.code
-  reportContent.value = ''
-  reportError.value = ''
-  reportStreaming.value = true
-  reportAbortCtrl = new AbortController()
-
-  try {
-    const resp = await fetch(`/api/prediction/compare/${code}/report`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'text/event-stream',
-        'Authorization': 'Bearer ' + (userStore.token || '')
-      },
-      signal: reportAbortCtrl.signal
-    })
-    if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status)
-
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buf = ''
-    let currentEvent = 'message'
-    let dataLines = []
-
-    const dispatch = () => {
-      if (!dataLines.length) { currentEvent = 'message'; return }
-      const data = dataLines.join('\n')
-      dataLines = []
-      if (currentEvent === 'delta') reportContent.value += data
-      else if (currentEvent === 'error') reportError.value = data
-      currentEvent = 'message'
-    }
-
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let idx
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx).replace(/\r$/, '')
-        buf = buf.slice(idx + 1)
-        if (!line) { dispatch(); continue }
-        if (line.startsWith('event:')) currentEvent = line.slice(6).trim()
-        else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''))
-      }
-    }
-    dispatch()
-  } catch (e) {
-    if (e.name !== 'AbortError') {
-      reportError.value = e.message || '报告生成失败'
-      ElMessage.error('AI 解读失败：' + (e.message || e))
-    }
-  } finally {
-    reportStreaming.value = false
-    reportAbortCtrl = null
-  }
-}
-
-const stopReport = () => {
-  if (reportAbortCtrl) { reportAbortCtrl.abort(); reportAbortCtrl = null }
-}
-
-const copyReport = async () => {
-  if (!reportContent.value) return
-  try {
-    await navigator.clipboard.writeText(reportContent.value)
-    ElMessage.success('报告已复制到剪贴板')
-  } catch (_) { ElMessage.warning('复制失败，请手动选择') }
-}
+watch(codeInput, () => reportSse.reset())
 
 // ---------- 分歧度计算 ----------
 const divergence = computed(() => {
@@ -272,30 +195,6 @@ const renderProbaCompareChart = () => {
                  color: '#a78bfa', fontSize: 11, fontWeight: 600 } }
     ]
   })
-}
-
-const formatImportance = (v) => {
-  if (v == null || Number.isNaN(v)) return '—'
-  const n = Number(v)
-  if (Math.abs(n) < 1) return n.toFixed(4)
-  return Math.round(n).toString()
-}
-
-// 与单预测页保持一致的特征值格式化
-const PCT_FEATS = new Set([
-  'ret_1d','ret_5d','ret_10d','ret_20d','ret_60d',
-  'close_ma5','close_ma10','close_ma20','close_ma60',
-  'ma5_ma20','ma10_ma60',
-  'vol_5d','vol_20d','vol_60d',
-  'atr_pct','dist_high_20','dist_low_20','bb_pos','bb_width'
-])
-const formatValue = (name, value) => {
-  if (value == null || Number.isNaN(Number(value))) return '—'
-  if (PCT_FEATS.has(name)) return (value * 100).toFixed(2) + '%'
-  if (name === 'turnover_rate_ma5') return Number(value).toFixed(2) + '%'
-  if (name === 'vol_ratio_5' || name === 'vol_ratio_20') return Number(value).toFixed(2) + 'x'
-  if (name === 'up_streak') return Math.round(value).toString()
-  return Number(value).toFixed(2)
 }
 
 const onResize = () => probaCompareChart?.resize()

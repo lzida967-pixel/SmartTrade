@@ -6,6 +6,7 @@ import com.smarttrade.entity.AiPredictLog;
 import com.smarttrade.entity.StockDailyPrice;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -16,7 +17,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 
 /**
  * AI 预测结果落库 + 后置校验 + 统计准确率。
@@ -44,6 +45,11 @@ public class PredictionLogService {
     @Autowired
     private StockDailyPriceService stockDailyPriceService;
 
+    /** 轻量持久化线程池，避免每次 saveAsync 都新建 Executor。 */
+    @Autowired
+    @Qualifier("persistenceExecutor")
+    private Executor persistenceExecutor;
+
     // ============================================================
     // 1. 落库（异步）
     // ============================================================
@@ -53,11 +59,7 @@ public class PredictionLogService {
         if (dto == null || dto.getCode() == null || dto.getAsOfDate() == null) {
             return;
         }
-        Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "predict-log-save-" + dto.getCode());
-            t.setDaemon(true);
-            return t;
-        }).execute(() -> {
+        persistenceExecutor.execute(() -> {
             try {
                 doSave(dto);
             } catch (Exception e) {

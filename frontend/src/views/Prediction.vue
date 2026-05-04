@@ -13,11 +13,13 @@ import * as echarts from 'echarts'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import request from '../utils/request'
-import { useUserStore } from '../stores/user'
+import {
+  labelMeta, formatValue, formatImportance, featureDescription
+} from '../utils/predictionFormat'
+import { usePredictionSse } from '../composables/usePredictionSse'
 
 const route = useRoute()
 const router = useRouter()
-const userStore = useUserStore()
 const goCompare = () => router.push({ path: '/prediction/compare', query: { code: codeInput.value } })
 // 支持从 URL query 读取股票代码（如 /prediction?code=600519）
 const codeInput = ref(route.query.code || '600519')
@@ -33,11 +35,18 @@ const loading = ref(false)
 const result = ref(null)
 const error = ref('')
 
-// AI 报告相关状态
-const reportContent = ref('')         // 流式累积的 markdown 文本
-const reportStreaming = ref(false)    // 是否正在生成中
-const reportError = ref('')
-let reportAbortCtrl = null
+// AI 报告相关状态（由 usePredictionSse composable 管理）
+const reportSse = usePredictionSse({
+  buildUrl: (code) => `/api/prediction/lgbm/${code}/report?model=${modelKey.value}`,
+  errorHint: 'AI 报告生成失败',
+  onBeforeStart: () => {
+    if (!result.value) { ElMessage.warning('请先生成预测结果'); return false }
+  }
+})
+const { content: reportContent, streaming: reportStreaming, errorMsg: reportError } = reportSse
+const generateReport = () => reportSse.start(result.value?.code)
+const stopReport = () => reportSse.stop()
+const copyReport = () => reportSse.copy()
 
 marked.setOptions({ breaks: true, gfm: true })
 const renderMarkdown = (text) => {
@@ -58,13 +67,6 @@ const quickCodes = [
   { code: '601899', name: '紫金矿业' },
   { code: '600036', name: '招商银行' }
 ]
-
-// 标签元信息
-const labelMeta = {
-  0: { name: '看多', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', icon: '↑' },
-  1: { name: '震荡', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', icon: '—' },
-  2: { name: '看空', color: '#10b981', bg: 'rgba(16,185,129,0.12)', icon: '↓' }
-}
 
 const currentMeta = computed(() => result.value ? labelMeta[result.value.label] : null)
 
@@ -99,9 +101,7 @@ const fetchPrediction = async () => {
     return
   }
   // 切换股票时清空旧报告
-  stopReport()
-  reportContent.value = ''
-  reportError.value = ''
+  reportSse.reset()
 
   loading.value = true
   error.value = ''
@@ -116,98 +116,6 @@ const fetchPrediction = async () => {
     result.value = null
   } finally {
     loading.value = false
-  }
-}
-
-// ============ 生成 AI 分析报告（SSE 流式）============
-const generateReport = async () => {
-  if (!result.value) {
-    ElMessage.warning('请先生成预测结果')
-    return
-  }
-  if (reportStreaming.value) return
-
-  const code = result.value.code
-  reportContent.value = ''
-  reportError.value = ''
-  reportStreaming.value = true
-  reportAbortCtrl = new AbortController()
-
-  try {
-    const resp = await fetch(`/api/prediction/lgbm/${code}/report?model=${modelKey.value}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'text/event-stream',
-        'Authorization': 'Bearer ' + (userStore.token || '')
-      },
-      signal: reportAbortCtrl.signal
-    })
-
-    if (!resp.ok || !resp.body) {
-      throw new Error('HTTP ' + resp.status)
-    }
-
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buf = ''
-    let currentEvent = 'message'
-    let dataLines = []
-
-    const dispatch = () => {
-      if (!dataLines.length) { currentEvent = 'message'; return }
-      const data = dataLines.join('\n')
-      dataLines = []
-      if (currentEvent === 'delta') {
-        reportContent.value += data
-      } else if (currentEvent === 'error') {
-        reportError.value = data
-      }
-      currentEvent = 'message'
-    }
-
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let idx
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const rawLine = buf.slice(0, idx)
-        buf = buf.slice(idx + 1)
-        const line = rawLine.replace(/\r$/, '')
-        if (!line) { dispatch(); continue }
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim()
-        } else if (line.startsWith('data:')) {
-          dataLines.push(line.slice(5).replace(/^ /, ''))
-        }
-      }
-    }
-    dispatch()
-  } catch (e) {
-    if (e.name !== 'AbortError') {
-      reportError.value = e.message || '报告生成失败'
-      ElMessage.error('AI 报告生成失败：' + (e.message || e))
-    }
-  } finally {
-    reportStreaming.value = false
-    reportAbortCtrl = null
-  }
-}
-
-const stopReport = () => {
-  if (reportAbortCtrl) {
-    reportAbortCtrl.abort()
-    reportAbortCtrl = null
-  }
-}
-
-const copyReport = async () => {
-  if (!reportContent.value) return
-  try {
-    await navigator.clipboard.writeText(reportContent.value)
-    ElMessage.success('报告已复制到剪贴板')
-  } catch (_) {
-    ElMessage.warning('复制失败，请手动选择文本复制')
   }
 }
 
@@ -301,31 +209,6 @@ const renderFeatureChart = () => {
   })
 }
 
-// 重要性格式化：XGBoost 返回 0~1 的浮点，LightGBM 返回整数 split 次数
-const formatImportance = (v) => {
-  if (v == null || Number.isNaN(v)) return '—'
-  const n = Number(v)
-  if (Math.abs(n) < 1) return n.toFixed(4)
-  return Math.round(n).toString()
-}
-
-// 特征值格式化
-const formatValue = (name, value) => {
-  if (value == null) return '—'
-  // 比率类（小数 → 百分比展示）
-  const pctFeats = ['ret_1d','ret_5d','ret_10d','ret_20d','ret_60d','close_ma5','close_ma10',
-    'close_ma20','close_ma60','ma5_ma20','ma10_ma60','vol_5d','vol_20d','vol_60d',
-    'atr_pct','dist_high_20','dist_low_20','bb_pos','bb_width']
-  if (pctFeats.includes(name)) return (value * 100).toFixed(2) + '%'
-  // turnover_rate_ma5 已经是百分比单位（baostock 原始就是 1.2 表示 1.2%）
-  if (name === 'turnover_rate_ma5') return value.toFixed(2) + '%'
-  // 倍数类
-  if (['vol_ratio_5','vol_ratio_20'].includes(name)) return value.toFixed(2) + 'x'
-  // 整数类
-  if (['up_streak'].includes(name)) return Math.round(value)
-  return value.toFixed(2)
-}
-
 const onResize = () => {
   probaChart?.resize()
   featureChart?.resize()
@@ -350,45 +233,6 @@ watch(() => route.query.code, (newCode) => {
   }
 })
 
-// 特征中文释义
-const featureDescMap = {
-  ret_1d: '近 1 日涨跌幅',
-  ret_5d: '近 5 日累计涨跌幅',
-  ret_10d: '近 10 日累计涨跌幅',
-  ret_20d: '近 20 日累计涨跌幅',
-  ret_60d: '近 60 日累计涨跌幅（中期动量）',
-  close_ma5: '收盘价相对 5 日均线偏离度',
-  close_ma10: '收盘价相对 10 日均线偏离度',
-  close_ma20: '收盘价相对 20 日均线偏离度',
-  close_ma60: '收盘价相对 60 日均线偏离度',
-  ma5_ma20: '5 日均线相对 20 日均线发散度',
-  ma10_ma60: '10 日均线相对 60 日均线发散度',
-  vol_5d: '近 5 日收益率标准差（短期波动）',
-  vol_20d: '近 20 日收益率标准差（中期波动）',
-  vol_60d: '近 60 日收益率标准差（长期波动）',
-  atr_pct: '14 日平均真实波幅 / 收盘价',
-  rsi_6: 'RSI(6) 强弱指标，>70 超买 / <30 超卖',
-  rsi_14: 'RSI(14) 强弱指标',
-  macd: 'MACD 主线值',
-  macd_signal: 'MACD 信号线值',
-  macd_diff: 'MACD 柱（差值）',
-  kdj_k: 'KDJ 的 K 值',
-  kdj_d: 'KDJ 的 D 值',
-  kdj_j: 'KDJ 的 J 值',
-  bb_pos: '布林带相对位置（0=下轨，1=上轨）',
-  bb_width: '布林带带宽 / 中轨',
-  vol_ratio_5: '当日量 / 5 日均量（量比）',
-  vol_ratio_20: '当日量 / 20 日均量',
-  turnover_rate_ma5: '5 日平均换手率',
-  up_streak: '连涨天数',
-  dist_high_20: '收盘价相对 20 日最高价距离',
-  dist_low_20: '收盘价相对 20 日最低价距离',
-  pe_ttm: 'PE-TTM 动态市盈率',
-  pb_mrq: 'PB 市净率',
-  ps_ttm: 'PS-TTM 市销率',
-  log_amount: '成交额对数（log1p）'
-}
-const featureDescription = (name) => featureDescMap[name] || '—'
 </script>
 
 <template>

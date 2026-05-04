@@ -5,6 +5,7 @@ import com.smarttrade.entity.User;
 import com.smarttrade.utils.UserContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -13,7 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 
 /**
  * 基于 LightGBM 预测结果生成 AI 分析报告。
@@ -38,6 +39,11 @@ public class PredictionReportService {
     @Autowired
     private UserService userService;
 
+    /** SSE 流式报告专用线程池，由 AsyncConfig 提供，避免每次请求新建 Executor 泄漏。 */
+    @Autowired
+    @Qualifier("sseStreamExecutor")
+    private Executor reportExecutor;
+
     /**
      * 启动一次报告生成（异步）。
      * 调用方应保证 emitter 已配置好 onCompletion / onError。
@@ -52,14 +58,8 @@ public class PredictionReportService {
 
         final String model = (modelKey == null || modelKey.isBlank()) ? "lgbm" : modelKey.toLowerCase();
 
-        // 把整段流程放进新线程：预测调用 + prompt 构建 + Qwen 流式
-        // 否则 predictionClient.predict() 是同步的，会阻塞 controller 返回 emitter，
-        // 进而阻塞 Spring MVC 把 emitter 绑定到 response，导致首字延迟
-        Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "report-stream-" + stockCode);
-            t.setDaemon(true);
-            return t;
-        }).execute(() -> doStreamReport(stockCode, model, emitter));
+        // 提交到共享线程池，避免阻塞 Spring MVC 返回 emitter 的线程
+        reportExecutor.execute(() -> doStreamReport(stockCode, model, emitter));
     }
 
     private void doStreamReport(String stockCode, String modelKey, SseEmitter emitter) {
@@ -84,11 +84,7 @@ public class PredictionReportService {
      */
     public void streamCompareReport(String stockCode, SseEmitter emitter) {
         recordCompareAudit(stockCode);
-        Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "compare-report-" + stockCode);
-            t.setDaemon(true);
-            return t;
-        }).execute(() -> doStreamCompareReport(stockCode, emitter));
+        reportExecutor.execute(() -> doStreamCompareReport(stockCode, emitter));
     }
 
     private void doStreamCompareReport(String stockCode, SseEmitter emitter) {

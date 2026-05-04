@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.smarttrade.config.AiChatProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -18,7 +19,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 
 /**
  * 调用 DashScope（通义千问）OpenAI 兼容流式 API，
@@ -30,6 +31,11 @@ public class AiChatService {
 
     @Autowired
     private AiChatProperties properties;
+
+    /** 共享 SSE 流式线程池，替代每次请求 new 一个 Executor 的泄漏写法。 */
+    @Autowired
+    @Qualifier("sseStreamExecutor")
+    private Executor streamExecutor;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -49,11 +55,7 @@ public class AiChatService {
             return;
         }
 
-        Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "ai-chat-stream");
-            t.setDaemon(true);
-            return t;
-        }).execute(() -> doStream(userMessages, emitter));
+        streamExecutor.execute(() -> doStream(userMessages, emitter));
     }
 
     private void doStream(List<Map<String, String>> userMessages, SseEmitter emitter) {
