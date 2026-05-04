@@ -2,6 +2,7 @@ package com.smarttrade.controller;
 
 import com.smarttrade.annotation.AuditLog;
 import com.smarttrade.common.Result;
+import com.smarttrade.dto.ChangePasswordDTO;
 import com.smarttrade.dto.LoginDTO;
 import com.smarttrade.dto.RegisterDTO;
 import com.smarttrade.dto.UpdateProfileDTO;
@@ -161,6 +162,19 @@ public class UserController {
             return Result.error("用户不存在");
         }
         return Result.success(vo);
+    }
+
+    /**
+     * 修改密码：需要提供当前密码核验，防止他人在未锁屏时改密码
+     */
+    @PutMapping("/password")
+    @AuditLog(category = "AUTH", action = "CHANGE_PASSWORD",
+            targetType = "USER", target = "#userId",
+            summary = "用户修改了登录密码")
+    public Result<Void> changePassword(@Validated @RequestBody ChangePasswordDTO dto) {
+        Long userId = UserContext.getUserId();
+        userService.changePassword(userId, dto);
+        return Result.success(null, "密码修改成功，请重新登录");
     }
 
     /**

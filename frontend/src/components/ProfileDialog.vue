@@ -59,8 +59,43 @@
           </vs-input>
         </div>
       </div>
+
+      <!-- 分隔线 -->
+      <div class="h-px bg-gray-800 my-6"></div>
+
+      <!-- 修改密码区块 -->
+      <div class="space-y-1 mb-2">
+        <label class="text-xs font-semibold text-gray-400 tracking-widest pl-1">修改登录密码</label>
+        <p class="text-[11px] text-gray-600 pl-1">留空则不修改密码</p>
+      </div>
+      <div class="space-y-3">
+        <vs-input
+          v-model="pwdForm.oldPassword"
+          type="password"
+          placeholder="当前密码"
+          class="fin-dark-input block w-full"
+        >
+          <template #icon><Lock class="w-4 h-4" /></template>
+        </vs-input>
+        <vs-input
+          v-model="pwdForm.newPassword"
+          type="password"
+          placeholder="新密码（至少 6 位）"
+          class="fin-dark-input block w-full"
+        >
+          <template #icon><Lock class="w-4 h-4" /></template>
+        </vs-input>
+        <vs-input
+          v-model="pwdForm.confirmPassword"
+          type="password"
+          placeholder="确认新密码"
+          class="fin-dark-input block w-full"
+        >
+          <template #icon><Lock class="w-4 h-4" /></template>
+        </vs-input>
+      </div>
     </div>
-    
+
     <template #footer>
       <div class="flex gap-4 justify-end">
         <vs-button type="transparent" color="#71717a" @click="visible = false" class="font-bold">
@@ -80,7 +115,7 @@ import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import request from '../utils/request'
-import { User, Camera, Loading, EditPen } from '@element-plus/icons-vue'
+import { User, Camera, Loading, EditPen, Lock } from '@element-plus/icons-vue'
 
 const props = defineProps({
   modelValue: Boolean
@@ -103,11 +138,20 @@ const form = ref({
   nickname: ''
 })
 
-// 当弹窗打开时，回填仓库里的当前数据
+const pwdForm = ref({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+
+// 当弹窗打开时，回填仓库里的当前数据，并清空密码表单
 watch(visible, (val) => {
   if (val && userStore.userInfo) {
     form.value.avatar = userStore.userInfo.avatar || ''
     form.value.nickname = userStore.userInfo.nickname || ''
+  }
+  if (!val) {
+    pwdForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
   }
 })
 
@@ -167,20 +211,39 @@ const customUpload = async (options) => {
 
 // 保存修改回填到后端
 const submitUpdate = async () => {
+    const wantChangePwd = pwdForm.value.oldPassword || pwdForm.value.newPassword || pwdForm.value.confirmPassword
+
+    if (wantChangePwd) {
+      if (!pwdForm.value.oldPassword) { ElMessage.warning('请输入当前密码'); return }
+      if (pwdForm.value.newPassword.length < 6) { ElMessage.warning('新密码长度不能少于 6 位'); return }
+      if (pwdForm.value.newPassword !== pwdForm.value.confirmPassword) { ElMessage.warning('两次输入的新密码不一致'); return }
+    }
+
     submitLoading.value = true
     try {
-        const res = await request.put('/user/profile', {
+        const profileRes = await request.put('/user/profile', {
             nickname: form.value.nickname,
             avatar: form.value.avatar
         })
-        if(res.code === 200) {
-            ElMessage.success('账户核心数据同步成功')
-            // 更新本地 Store
-            if(userStore.userInfo) {
-               userStore.userInfo.nickname = form.value.nickname
-               userStore.userInfo.avatar = form.value.avatar
-            }
-            visible.value = false
+        if (profileRes.code === 200 && userStore.userInfo) {
+            userStore.userInfo.nickname = form.value.nickname
+            userStore.userInfo.avatar = form.value.avatar
+        }
+
+        if (wantChangePwd) {
+          await request.put('/user/password', {
+            oldPassword: pwdForm.value.oldPassword,
+            newPassword: pwdForm.value.newPassword
+          })
+          ElMessage.success('密码修改成功，即将重新登录')
+          visible.value = false
+          setTimeout(() => {
+            userStore.clearAuth()
+            window.location.href = '/login'
+          }, 1500)
+        } else {
+          ElMessage.success('账户核心数据同步成功')
+          visible.value = false
         }
     } catch(e) {
         console.error(e)

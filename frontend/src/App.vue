@@ -111,12 +111,6 @@
                       </span>
                       <el-icon class="opacity-0 group-hover/item:opacity-100 transition-all translate-x-1 group-hover/item:translate-x-0"><ArrowRight /></el-icon>
                     </a>
-                    <a @click="handleCommand('api')" class="flex items-center justify-between px-4 py-3 rounded-lg text-sm text-gray-300 hover:text-blue-400 hover:bg-blue-500/10 transition-colors cursor-pointer font-medium group/item">
-                      <span class="flex items-center gap-3">
-                         <el-icon class="text-lg"><Key /></el-icon> 交易 API 管理
-                      </span>
-                      <el-icon class="opacity-0 group-hover/item:opacity-100 transition-all translate-x-1 group-hover/item:translate-x-0"><ArrowRight /></el-icon>
-                    </a>
                   </div>
 
                   <div class="h-px bg-gray-800 my-1 mx-3 relative z-10"></div>
@@ -156,8 +150,8 @@ import request from './utils/request'
 import ProfileDialog from './components/ProfileDialog.vue'
 import { 
   TrendCharts, DataBoard, List, Wallet, 
-  User, Key, SwitchButton, ArrowRight,
-  ChatDotRound, Trophy, Monitor, MagicStick
+  User, SwitchButton, ArrowRight,
+  ChatDotRound, Monitor, MagicStick
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -201,8 +195,6 @@ const handleCommand = (command) => {
   } else if (command === 'profile') {
     // 打开设置面板
     profileVisible.value = true
-  } else if (command === 'api') {
-    ElMessage.info('API密钥管理功能开发中...')
   }
 }
 </script>

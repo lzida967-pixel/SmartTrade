@@ -1,6 +1,7 @@
 package com.smarttrade.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.smarttrade.dto.ChangePasswordDTO;
 import com.smarttrade.dto.LoginDTO;
 import com.smarttrade.dto.RegisterDTO;
 import com.smarttrade.entity.User;
@@ -17,5 +18,6 @@ public interface UserService extends IService<User> {
      * 注册
      */
     void register(RegisterDTO registerDTO);
-    
+
+    void changePassword(Long userId, ChangePasswordDTO dto);
 }

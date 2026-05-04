@@ -2,6 +2,7 @@ package com.smarttrade.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.smarttrade.dto.ChangePasswordDTO;
 import com.smarttrade.dto.LoginDTO;
 import com.smarttrade.dto.RegisterDTO;
 import com.smarttrade.entity.User;
@@ -78,5 +79,25 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         newUser.setUpdatedAt(LocalDateTime.now());
 
         this.getBaseMapper().insert(newUser);
+    }
+
+    @Override
+    public void changePassword(Long userId, ChangePasswordDTO dto) {
+        User user = this.getById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        String oldMd5 = DigestUtils.md5DigestAsHex(dto.getOldPassword().getBytes());
+        if (!user.getPassword().equals(oldMd5)) {
+            throw new RuntimeException("当前密码错误");
+        }
+        if (dto.getOldPassword().equals(dto.getNewPassword())) {
+            throw new RuntimeException("新密码不能与当前密码相同");
+        }
+        User update = new User();
+        update.setId(userId);
+        update.setPassword(DigestUtils.md5DigestAsHex(dto.getNewPassword().getBytes()));
+        update.setUpdatedAt(LocalDateTime.now());
+        this.getBaseMapper().updateById(update);
     }
 }
