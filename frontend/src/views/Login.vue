@@ -83,7 +83,10 @@
             <vs-checkbox v-model="rememberMe" style="--vs-color: 59,130,246;">
                <span class="text-xs text-gray-400 tracking-wider">保存会话</span>
             </vs-checkbox>
-            <span class="text-xs text-gray-500 hover:text-white cursor-pointer transition-colors duration-300">忘记凭证?</span>
+            <span
+              class="text-xs text-gray-500 hover:text-white cursor-pointer transition-colors duration-300"
+              @click="handleForgotPassword"
+            >忘记凭证?</span>
           </div>
 
           <div class="pt-4 animate-slide-up" style="animation-delay: 0.5s; animation-fill-mode: both;">
@@ -145,11 +148,11 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import request from '../utils/request'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Lock, EditPen, DataLine, Select, ArrowRight } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -158,7 +161,15 @@ const userStore = useUserStore()
 const isLogin = ref(true)
 const loading = ref(false)
 const isSuccess = ref(false)
-const rememberMe = ref(false)
+// 默认勾选「保存会话」，与之前的隐式持久化行为兼容
+const rememberMe = ref(true)
+// 上次成功登录的用户名，方便用户切回来时填回（仅在勾选保存会话时记忆）
+const REMEMBER_USERNAME_KEY = 'login.rememberedUsername'
+
+onMounted(() => {
+  const saved = localStorage.getItem(REMEMBER_USERNAME_KEY)
+  if (saved) form.username = saved
+})
 
 const form = reactive({
   username: '',
@@ -186,7 +197,14 @@ const handleAction = async () => {
         username: form.username,
         password: form.password
       })
-      userStore.setToken(res.data)
+      // 根据「保存会话」勾选决定 token 持久化方式
+      userStore.setToken(res.data, rememberMe.value)
+      // 持久化模式下记住用户名；非持久化清除
+      if (rememberMe.value) {
+        localStorage.setItem(REMEMBER_USERNAME_KEY, form.username)
+      } else {
+        localStorage.removeItem(REMEMBER_USERNAME_KEY)
+      }
       loginSuccessPipeline()
     } else {
       // 执行注册
@@ -213,6 +231,40 @@ const loginSuccessPipeline = () => {
   setTimeout(() => {
     router.push('/')
   }, 2200)
+}
+
+// 忘记凭证：弹输入框 → 提交重置申请 → 后台审计日志可见，管理员处理后告知用户新密码
+const handleForgotPassword = async () => {
+  let inputUsername = ''
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请输入您的账号，系统将向管理员提交重置申请。<br/>' +
+      '<span style="color:#94a3b8;font-size:12px;">管理员审核后会将密码重置为 <b style="color:#fbbf24">123456</b>，请登录后立即修改。</span>',
+      '忘记凭证',
+      {
+        confirmButtonText: '提交申请',
+        cancelButtonText: '取消',
+        inputPlaceholder: '请输入账号',
+        dangerouslyUseHTMLString: true,
+        inputValidator: (v) => v && v.trim() ? true : '账号不能为空',
+        customClass: 'forgot-password-dialog'
+      }
+    )
+    inputUsername = value?.trim()
+  } catch {
+    return  // 用户点取消
+  }
+
+  try {
+    const res = await request.post('/user/password-reset-request', { username: inputUsername })
+    ElMessage({
+      type: 'success',
+      message: res.msg || '申请已提交，请联系管理员核实身份后重置',
+      duration: 5000
+    })
+  } catch (e) {
+    // request 拦截器已处理 error 弹窗
+  }
 }
 
 // 随机生成背景中漂浮的K线数据流CSS样式

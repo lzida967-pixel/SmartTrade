@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/user")
@@ -59,6 +60,55 @@ public class UserController {
             throw e;
         }
     }
+
+    /**
+     * 忘记密码 — 提交重置申请。
+     *
+     * 流程：用户在登录页填用户名 → 后端记一条审计日志 → 管理员在审计页看到 →
+     * 用现有「重置密码」按钮把密码重置为 123456 → 线下告知用户。
+     *
+     * 安全考虑：
+     *   1) 不需要登录态（已加入 WebMvcConfig 放行列表）
+     *   2) 同一用户名 5 分钟内只允许提交 1 次（内存简单限流）
+     *   3) 即使用户名不存在也返回 success，避免被用作账号枚举
+     */
+    @PostMapping("/password-reset-request")
+    public Result<String> passwordResetRequest(@RequestBody Map<String, String> body) {
+        String username = body == null ? null : body.get("username");
+        if (username == null || username.isBlank()) {
+            return Result.error(400, "请输入用户名");
+        }
+        username = username.trim();
+
+        // 限流：同名 5 分钟内仅一次
+        long now = System.currentTimeMillis();
+        Long last = RESET_REQUEST_RATE.get(username);
+        if (last != null && now - last < 5 * 60 * 1000L) {
+            return Result.error(429, "请勿频繁提交，请稍候再试");
+        }
+        RESET_REQUEST_RATE.put(username, now);
+        // 顺手清理过期 key（容量上限保护）
+        if (RESET_REQUEST_RATE.size() > 1000) {
+            RESET_REQUEST_RATE.entrySet().removeIf(e -> now - e.getValue() > 30 * 60 * 1000L);
+        }
+
+        // 反查是否真的存在该用户（仅用于落库 userId，对客户端永远返回成功提示）
+        User u = userService.lambdaQuery().eq(User::getUsername, username).one();
+        Map<String, Object> details = new HashMap<>();
+        details.put("username", username);
+        details.put("userExists", u != null);
+
+        auditLogService.record(
+                "AUTH", "PASSWORD_RESET_REQUEST",
+                u == null ? null : u.getId(), username, u == null ? "GUEST" : u.getRole(),
+                "USER", u == null ? null : u.getId().toString(),
+                "用户提交了密码重置申请", details, true, null);
+
+        return Result.success(null, "申请已提交，请联系管理员核实身份后重置");
+    }
+
+    /** 用户名 → 上次提交时间戳，用于简单限流 */
+    private static final Map<String, Long> RESET_REQUEST_RATE = new ConcurrentHashMap<>();
 
     @PostMapping("/register")
     @AuditLog(category = "AUTH", action = "REGISTER",

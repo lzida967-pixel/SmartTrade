@@ -72,6 +72,7 @@ public class AdminAuditController {
                 opt("CHANGE_ROLE",          "改角色"),
                 opt("CHANGE_STATUS",        "改启用状态"),
                 opt("RESET_PASSWORD",       "重置密码"),
+                opt("PASSWORD_RESET_REQUEST", "申请重置密码"),
                 opt("ADD_STOCK",            "新增股票"),
                 opt("DELETE_STOCK",         "删除股票"),
                 opt("TRIGGER_SYNC_ALL",     "触发全量同步"),
