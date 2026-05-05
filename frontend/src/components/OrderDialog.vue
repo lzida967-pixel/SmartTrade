@@ -121,7 +121,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Top, Bottom } from '@element-plus/icons-vue'
-import request from '../utils/request'
+import { placeOrder } from '../api/trade'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -258,7 +258,7 @@ const onSubmit = async () => {
     if (form.value.orderType === 'LIMIT') {
       payload.price = form.value.price
     }
-    const res = await request.post('/trade/order', payload)
+    const res = await placeOrder(payload)
     if (res.code === 200) {
       ElMessage.success(res.msg || '下单成功')
       visible.value = false

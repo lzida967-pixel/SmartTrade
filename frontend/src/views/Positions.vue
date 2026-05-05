@@ -135,7 +135,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Wallet, Refresh, DataLine, Download } from '@element-plus/icons-vue'
-import request from '../utils/request'
+import { getStockList } from '../api/market'
+import { getAsset } from '../api/user'
+import { getPositions } from '../api/trade'
 import OrderDialog from '../components/OrderDialog.vue'
 import { toCSV, downloadCSV, tsForFilename } from '../utils/csv'
 
@@ -178,7 +180,7 @@ const stockName = (code) => stockMap.value[code]?.stockName || ''
 
 const loadStockMap = async () => {
   try {
-    const res = await request.get('/stock/list')
+    const res = await getStockList()
     if (res.code === 200) {
       const m = {}
       for (const s of res.data || []) m[s.stockCode] = s
@@ -189,7 +191,7 @@ const loadStockMap = async () => {
 
 const loadAsset = async () => {
   try {
-    const res = await request.get('/user/asset')
+    const res = await getAsset()
     if (res.code === 200) {
       asset.value = {
         availableFunds: Number(res.data.availableFunds || 0),
@@ -203,7 +205,7 @@ const loadAsset = async () => {
 
 const loadPositions = async () => {
   try {
-    const res = await request.get('/trade/positions')
+    const res = await getPositions()
     if (res.code === 200) {
       positions.value = res.data || []
     }

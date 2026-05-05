@@ -1,6 +1,6 @@
 ﻿import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import request from '../utils/request'
+import { getUserInfo } from '../api/user'
 
 const routes = [
   {
@@ -104,7 +104,7 @@ router.beforeEach(async (to, from) => {
   // 如果访问的是新标签页/刷新页面，userInfo可能尚未加载，此时必须先等待拉取信息
   if (userStore.token && !userStore.userInfo && to.path !== '/login') {
     try {
-      const res = await request.get('/user/info')
+      const res = await getUserInfo()
       if (res.code === 200) {
         userStore.setUserInfo(res.data)
       } else {

@@ -148,6 +148,7 @@ import {
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useUserStore } from '../stores/user'
+import { aiChatStreamUrl } from '../api/ai'
 
 const userStore = useUserStore()
 const STORAGE_KEY = 'ai_chat_messages_v1'
@@ -279,7 +280,7 @@ const send = async () => {
   }
 
   try {
-    const resp = await fetch('/api/ai/chat', {
+    const resp = await fetch(aiChatStreamUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

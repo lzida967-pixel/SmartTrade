@@ -186,7 +186,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Search, Refresh, Setting, CircleCheck, Wallet } from '@element-plus/icons-vue'
-import request from '../../utils/request'
+import * as adminUserApi from '../../api/admin/user'
 
 const users = ref([])
 const total = ref(0)
@@ -221,7 +221,7 @@ const reload = async () => {
       role: filters.value.role || undefined,
       status: filters.value.status === '' ? undefined : filters.value.status
     }
-    const res = await request.get('/admin/users', { params })
+    const res = await adminUserApi.list(params)
     if (res.code === 200) {
       users.value = res.data.records || []
       total.value = res.data.total || 0
@@ -245,7 +245,7 @@ const saveFunds = async () => {
   if (!editing.value) return
   saving.value = true
   try {
-    const res = await request.put(`/admin/users/${editing.value.id}/funds`, {
+    const res = await adminUserApi.updateFunds(editing.value.id, {
       action: fundsForm.value.action,
       available: fundsForm.value.available,
       frozen: fundsForm.value.frozen
@@ -268,7 +268,7 @@ const toggleRole = async (row) => {
       '角色变更', { type: 'warning' }
     )
   } catch { return }
-  const res = await request.put(`/admin/users/${row.id}/role`, { role: next })
+  const res = await adminUserApi.updateRole(row.id, next)
   if (res.code === 200) {
     ElMessage.success('角色已更新')
     reload()
@@ -283,7 +283,7 @@ const toggleStatus = async (row) => {
       '状态变更', { type: 'warning' }
     )
   } catch { return }
-  const res = await request.put(`/admin/users/${row.id}/status`, { status: next })
+  const res = await adminUserApi.updateStatus(row.id, next)
   if (res.code === 200) {
     ElMessage.success(next === 1 ? '已启用' : '已禁用')
     reload()
@@ -297,7 +297,7 @@ const resetPwd = async (row) => {
       '重置密码', { type: 'warning' }
     )
   } catch { return }
-  const res = await request.put(`/admin/users/${row.id}/reset-password`)
+  const res = await adminUserApi.resetPassword(row.id)
   if (res.code === 200) {
     ElMessage.success('已重置为 123456')
   }

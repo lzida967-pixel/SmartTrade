@@ -18,7 +18,7 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import request from '../utils/request'
+import { compareTreeModels, compareReportStreamUrl } from '../api/prediction'
 import { labelMeta, formatValue } from '../utils/predictionFormat'
 import { usePredictionSse } from '../composables/usePredictionSse'
 
@@ -32,7 +32,7 @@ const results = ref({ lgbm: null, xgb: null })
 
 // AI 解读分歧（复用单预测页的 usePredictionSse composable）
 const reportSse = usePredictionSse({
-  buildUrl: (code) => `/api/prediction/compare/${code}/report`,
+  buildUrl: (code) => compareReportStreamUrl(code),
   errorHint: 'AI 分歧解读失败',
   onBeforeStart: () => {
     if (!results.value.lgbm || !results.value.xgb) {
@@ -79,10 +79,7 @@ const fetchCompare = async () => {
   results.value = { lgbm: null, xgb: null }
 
   try {
-    const [a, b] = await Promise.allSettled([
-      request.get(`/prediction/predict/${code}`, { params: { model: 'lgbm' } }),
-      request.get(`/prediction/predict/${code}`, { params: { model: 'xgb'  } })
-    ])
+    const [a, b] = await compareTreeModels(code)
     if (a.status === 'fulfilled') results.value.lgbm = a.value.data
     if (b.status === 'fulfilled') results.value.xgb  = b.value.data
     if (a.status === 'rejected' && b.status === 'rejected') {

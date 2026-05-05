@@ -160,7 +160,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Search, Refresh, DataLine, Download, ArrowDown } from '@element-plus/icons-vue'
-import request from '../utils/request'
+import { getStockList } from '../api/market'
+import { getOrders, getDeals, cancelOrder } from '../api/trade'
 import { toCSV, downloadCSV, tsForFilename } from '../utils/csv'
 
 const router = useRouter()
@@ -199,7 +200,7 @@ const stockName = (code) => stockMap.value[code]?.stockName || ''
 
 const loadStockMap = async () => {
   try {
-    const res = await request.get('/stock/list')
+    const res = await getStockList()
     if (res.code === 200) {
       const m = {}
       for (const s of res.data || []) m[s.stockCode] = s
@@ -214,7 +215,7 @@ const reload = async () => {
     const params = { page: page.value, size: size.value }
     if (filters.value.stockCode) params.stockCode = filters.value.stockCode.trim()
     if (filters.value.status) params.status = filters.value.status
-    const res = await request.get('/trade/orders', { params })
+    const res = await getOrders(params)
     if (res.code === 200) {
       orders.value = res.data?.records || []
       total.value = res.data?.total || 0
@@ -232,7 +233,7 @@ const fetchAllOrders = async () => {
   const params = { page: 1, size: 10000 }
   if (filters.value.stockCode) params.stockCode = filters.value.stockCode.trim()
   if (filters.value.status) params.status = filters.value.status
-  const res = await request.get('/trade/orders', { params })
+  const res = await getOrders(params)
   if (res.code !== 200) return []
   return res.data?.records || []
 }
@@ -240,7 +241,7 @@ const fetchAllOrders = async () => {
 const fetchAllDeals = async () => {
   const params = { page: 1, size: 10000 }
   if (filters.value.stockCode) params.stockCode = filters.value.stockCode.trim()
-  const res = await request.get('/trade/deals', { params })
+  const res = await getDeals(params)
   if (res.code !== 200) return []
   return res.data?.records || []
 }
@@ -331,7 +332,7 @@ const onCancel = async (row) => {
     )
   } catch { return }
   try {
-    const res = await request.post(`/trade/order/${row.orderNo}/cancel`)
+    const res = await cancelOrder(row.orderNo)
     if (res.code === 200) {
       ElMessage.success('撤单成功')
       reload()

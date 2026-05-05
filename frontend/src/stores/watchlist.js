@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import request from '../utils/request'
+import { getWatchlist, addWatch, removeWatch } from '../api/watchlist'
 
 /**
  * 自选股 store
@@ -21,7 +21,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     if (loading.value) return
     loading.value = true
     try {
-      const res = await request.get('/watchlist/codes')
+      const res = await getWatchlist()
       if (res.code === 200) {
         codes.value = new Set(res.data || [])
         loaded.value = true
@@ -36,7 +36,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const add = async (code) => {
     if (!code || codes.value.has(code)) return false
     try {
-      const res = await request.post(`/watchlist/${code}`)
+      const res = await addWatch(code)
       if (res.code === 200) {
         codes.value.add(code)
         // 触发响应式更新（Set 直接 mutate 不能被 Vue 追踪到长度变化的所有场景）
@@ -50,7 +50,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const remove = async (code) => {
     if (!code || !codes.value.has(code)) return false
     try {
-      const res = await request.delete(`/watchlist/${code}`)
+      const res = await removeWatch(code)
       if (res.code === 200) {
         codes.value.delete(code)
         codes.value = new Set(codes.value)

@@ -160,7 +160,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from './stores/user'
 import { useWatchlistStore } from './stores/watchlist'
 import { ElMessage } from 'element-plus'
-import request from './utils/request'
+import { getUserInfo } from './api/user'
 import ProfileDialog from './components/ProfileDialog.vue'
 import { 
   TrendCharts, DataBoard, List, Wallet, 
@@ -178,7 +178,7 @@ const profileVisible = ref(false)
 const fetchUserInfo = async () => {
   if (userStore.token && !userStore.userInfo) {
     try {
-      const res = await request.get('/user/info')
+      const res = await getUserInfo()
       if (res.code === 200) {
         userStore.setUserInfo(res.data)
       }

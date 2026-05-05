@@ -151,7 +151,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import request from '../utils/request'
+import { login, register, requestPasswordReset } from '../api/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, Lock, EditPen, DataLine, Select, ArrowRight } from '@element-plus/icons-vue'
 
@@ -193,10 +193,7 @@ const handleAction = async () => {
   try {
     if (isLogin.value) {
       // 执行登录
-      const res = await request.post('/user/login', {
-        username: form.username,
-        password: form.password
-      })
+      const res = await login(form.username, form.password)
       // 根据「保存会话」勾选决定 token 持久化方式
       userStore.setToken(res.data, rememberMe.value)
       // 持久化模式下记住用户名；非持久化清除
@@ -208,7 +205,7 @@ const handleAction = async () => {
       loginSuccessPipeline()
     } else {
       // 执行注册
-      await request.post('/user/register', {
+      await register({
         username: form.username,
         password: form.password,
         nickname: form.nickname
@@ -256,7 +253,7 @@ const handleForgotPassword = async () => {
   }
 
   try {
-    const res = await request.post('/user/password-reset-request', { username: inputUsername })
+    const res = await requestPasswordReset(inputUsername)
     ElMessage({
       type: 'success',
       message: res.msg || '申请已提交，请联系管理员核实身份后重置',

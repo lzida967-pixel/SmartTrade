@@ -152,7 +152,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { Document, Filter, Refresh, Close } from '@element-plus/icons-vue'
-import request from '../../utils/request'
+import * as auditApi from '../../api/admin/audit'
 
 const rows    = ref([])
 const total   = ref(0)
@@ -173,7 +173,7 @@ const filters = reactive({
 
 const loadDict = async () => {
   try {
-    const res = await request.get('/admin/audit/dict')
+    const res = await auditApi.getDict()
     if (res.code === 200) {
       dict.categories = res.data?.categories || []
       dict.actions    = res.data?.actions    || []
@@ -198,7 +198,7 @@ const reload = async () => {
       params.startTime = filters.dateRange[0]
       params.endTime   = filters.dateRange[1]
     }
-    const res = await request.get('/admin/audit', { params })
+    const res = await auditApi.list(params)
     if (res.code === 200) {
       rows.value  = res.data?.records || []
       total.value = res.data?.total   || 0

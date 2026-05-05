@@ -149,7 +149,7 @@ import { ref, computed, onMounted, nextTick, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MagicStick, Refresh, DataAnalysis, InfoFilled } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
-import request from '../../utils/request'
+import { getStats, verify } from '../../api/admin/prediction'
 
 const days = ref(30)
 const loading = ref(false)
@@ -164,7 +164,7 @@ const pendingCount = computed(() => {
 const loadStats = async () => {
   loading.value = true
   try {
-    const res = await request.get('/admin/prediction/stats', { params: { days: days.value } })
+    const res = await getStats(days.value)
     if (res.code === 200) {
       stats.value = res.data || []
       await nextTick()
@@ -178,7 +178,7 @@ const loadStats = async () => {
 const onVerify = async () => {
   verifying.value = true
   try {
-    const res = await request.post('/admin/prediction/verify')
+    const res = await verify()
     if (res.code === 200) {
       const count = res.data?.verifiedCount ?? 0
       if (count > 0) {

@@ -221,7 +221,9 @@ import {
   TrendCharts, DataLine, DataAnalysis, Refresh, Loading, Search,
   Star, StarFilled
 } from '@element-plus/icons-vue'
-import request from '../utils/request'
+import { getQuotes, getKline } from '../api/market'
+import { getAsset } from '../api/user'
+import { getPositions } from '../api/trade'
 import OrderDialog from '../components/OrderDialog.vue'
 import { useWatchlistStore } from '../stores/watchlist'
 
@@ -264,8 +266,8 @@ const openOrder = async (direction) => {
   // 拉取用户资产 + 该股可卖持仓
   try {
     const [assetRes, posRes] = await Promise.all([
-      request.get('/user/asset'),
-      request.get('/trade/positions')
+      getAsset(),
+      getPositions()
     ])
     if (assetRes.code === 200) {
       availableFunds.value = Number(assetRes.data?.availableFunds || 0)
@@ -330,7 +332,7 @@ const priceColor = (row) => {
 const loadQuotes = async () => {
   loadingQuotes.value = true
   try {
-    const res = await request.get('/stock/quotes')
+    const res = await getQuotes()
     if (res.code === 200) {
       quotes.value = res.data || []
       // 若 dialog 打开中，同步刷新选中股票的最新行情数据
@@ -374,9 +376,7 @@ const loadKline = async () => {
   if (!selected.value) return
   loadingKline.value = true
   try {
-    const res = await request.get(`/stock/kline/${selected.value.stockCode}`, {
-      params: { limit: klineLimit.value }
-    })
+    const res = await getKline(selected.value.stockCode, klineLimit.value)
     if (res.code === 200) {
       const points = res.data || []
       // dialog 还没真正打开（DOM 未渲染），先暂存，等 onOpened 钩子时再渲染

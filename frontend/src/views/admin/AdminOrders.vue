@@ -153,7 +153,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh, Filter, Clock, CircleCheck, CircleClose } from '@element-plus/icons-vue'
-import request from '../../utils/request'
+import * as adminOrderApi from '../../api/admin/order'
 
 const orders = ref([])
 const total = ref(0)
@@ -198,7 +198,7 @@ const reload = async () => {
       status: filters.value.status || undefined,
       direction: filters.value.direction || undefined
     }
-    const res = await request.get('/admin/orders', { params })
+    const res = await adminOrderApi.list(params)
     if (res.code === 200) {
       orders.value = res.data.records || []
       total.value = res.data.total || 0
@@ -215,7 +215,7 @@ const onForceCancel = async (row) => {
       '强制撤单', { type: 'warning' }
     )
   } catch { return }
-  const res = await request.post(`/admin/orders/${row.orderNo}/force-cancel`)
+  const res = await adminOrderApi.forceCancel(row.orderNo)
   if (res.code === 200) {
     ElMessage.success('已强制撤单')
     reload()

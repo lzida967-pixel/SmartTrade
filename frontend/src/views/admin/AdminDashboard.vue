@@ -227,7 +227,8 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
-import request from '../../utils/request'
+import { getStats, verify } from '../../api/admin/prediction'
+import { getOverview } from '../../api/admin/dashboard'
 
 const data = ref({})
 const loading = ref(false)
@@ -249,7 +250,7 @@ const accColor = (acc) => {
 
 const loadStats = async () => {
   try {
-    const res = await request.get('/admin/prediction/stats', { params: { days: statsDays.value } })
+    const res = await getStats(statsDays.value)
     if (res.code === 200) stats.value = res.data || []
   } catch (_) { /* ignore */ }
 }
@@ -257,7 +258,7 @@ const loadStats = async () => {
 const verifyPredictions = async () => {
   verifying.value = true
   try {
-    const res = await request.post('/admin/prediction/verify')
+    const res = await verify()
     if (res.code === 200) {
       const n = res.data?.verifiedCount || 0
       const pending = (stats.value || []).reduce((s, m) => Math.max(s, m.pendingCount || 0), 0)
@@ -297,7 +298,7 @@ const statusClass = (s) => ({
 const reload = async () => {
   loading.value = true
   try {
-    const res = await request.get('/admin/dashboard/overview')
+    const res = await getOverview()
     if (res.code === 200) {
       data.value = res.data || {}
       await nextTick()

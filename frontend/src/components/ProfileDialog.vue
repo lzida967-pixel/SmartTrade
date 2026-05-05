@@ -114,7 +114,7 @@ import { ref, computed, watch } from 'vue'
 import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
-import request from '../utils/request'
+import { updateProfile, changePassword } from '../api/user'
 import { User, Camera, Loading, EditPen, Lock } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -221,7 +221,7 @@ const submitUpdate = async () => {
 
     submitLoading.value = true
     try {
-        const profileRes = await request.put('/user/profile', {
+        const profileRes = await updateProfile({
             nickname: form.value.nickname,
             avatar: form.value.avatar
         })
@@ -231,10 +231,7 @@ const submitUpdate = async () => {
         }
 
         if (wantChangePwd) {
-          await request.put('/user/password', {
-            oldPassword: pwdForm.value.oldPassword,
-            newPassword: pwdForm.value.newPassword
-          })
+          await changePassword(pwdForm.value.oldPassword, pwdForm.value.newPassword)
           ElMessage.success('密码修改成功，即将重新登录')
           visible.value = false
           setTimeout(() => {

@@ -12,7 +12,8 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import request from '../utils/request'
+import { predict, reportStreamUrl } from '../api/prediction'
+import { getKline } from '../api/market'
 import {
   labelMeta, formatValue, formatImportance, featureDescription
 } from '../utils/predictionFormat'
@@ -30,7 +31,7 @@ const goTree    = () => router.push({ path: '/prediction',         query: { code
 const goCompare = () => router.push({ path: '/prediction/compare', query: { code: codeInput.value } })
 
 const reportSse = usePredictionSse({
-  buildUrl: (code) => `/api/prediction/predict/${code}/report?model=lstm`,
+  buildUrl: (code) => reportStreamUrl(code, 'lstm'),
   errorHint: 'AI 报告生成失败',
   onBeforeStart: () => {
     if (!result.value) { ElMessage.warning('请先生成预测结果'); return false }
@@ -86,7 +87,7 @@ const fetchPrediction = async () => {
   loading.value = true
   error.value = ''
   try {
-    const res = await request.get(`/prediction/predict/${code}`, { params: { model: 'lstm' } })
+    const res = await predict(code, 'lstm')
     result.value = res.data
     await nextTick()
     renderProbaChart()
@@ -115,7 +116,7 @@ const renderKlineForecast = async () => {
   klineLoading.value = true
   let points = []
   try {
-    const r = await request.get(`/stock/kline/${result.value.code}`, { params: { limit: 60 } })
+    const r = await getKline(result.value.code, 60)
     if (r.code === 200) points = r.data || []
   } catch (_) { /* ignore */ }
   klineLoading.value = false

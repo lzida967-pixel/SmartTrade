@@ -180,7 +180,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Coin, Search, Plus, Refresh, MagicStick, CircleCheck, Warning
 } from '@element-plus/icons-vue'
-import request from '../../utils/request'
+import * as adminStockApi from '../../api/admin/stock'
 
 const stocks = ref([])
 const loading = ref(false)
@@ -216,7 +216,7 @@ const syncTypeLabel = computed(() => {
 
 const pollSyncStatus = async () => {
   try {
-    const res = await request.get('/admin/stocks/sync-status')
+    const res = await adminStockApi.getSyncStatus()
     if (res.code !== 200) return
     const wasRunning = sync.value.running
     sync.value = res.data
@@ -263,7 +263,7 @@ const syncMissing = ref(false)
 
 const loadStats = async () => {
   try {
-    const res = await request.get('/admin/stocks/stats')
+    const res = await adminStockApi.getStats()
     if (res.code === 200) stats.value = res.data || { total: 0, withData: 0, missing: 0 }
   } catch (_) { /* 全局不阻断列表 */ }
 }
@@ -271,13 +271,11 @@ const loadStats = async () => {
 const reload = async () => {
   loading.value = true
   try {
-    const res = await request.get('/admin/stocks', {
-      params: {
-        page: page.value,
-        size: size.value,
-        keyword: search.value.trim() || undefined,
-        market: marketFilter.value || undefined
-      }
+    const res = await adminStockApi.list({
+      page: page.value,
+      size: size.value,
+      keyword: search.value.trim() || undefined,
+      market: marketFilter.value || undefined
     })
     if (res.code === 200) {
       stocks.value = res.data.records || []
@@ -298,7 +296,7 @@ const onAdd = async () => {
   }
   adding.value = true
   try {
-    const res = await request.post('/admin/stocks', addForm.value)
+    const res = await adminStockApi.add(addForm.value)
     if (res.code === 200) {
       ElMessage.success('已加入股票池，可点击"仅同步缺数据"补日 K')
       addDialog.value = false
@@ -316,7 +314,7 @@ const onDelete = async (row) => {
       '删除确认', { type: 'warning' }
     )
   } catch { return }
-  const res = await request.delete(`/admin/stocks/${row.stockCode}`)
+  const res = await adminStockApi.remove(row.stockCode)
   if (res.code === 200) {
     ElMessage.success('已删除')
     reload()
@@ -339,11 +337,11 @@ const onSyncAll = async () => {
   try {
     // 触发前先抓一下服务端现在的 finishedAt，后面用它判定本次任务是否已跑完
     try {
-      const probe = await request.get('/admin/stocks/sync-status')
+      const probe = await adminStockApi.getSyncStatus()
       if (probe.code === 200) priorFinishedAt = probe.data?.finishedAt || null
     } catch (_) { priorFinishedAt = null }
 
-    const res = await request.post('/admin/stocks/sync')
+    const res = await adminStockApi.syncAll()
     if (res.code === 200) {
       ElMessage.success(res.msg || '全量同步已启动')
       startPollSync()
@@ -361,11 +359,11 @@ const onSyncMissing = async () => {
   try {
     // 同上：先记下现在的 finishedAt，该是上一次任务完成时间点（或空）
     try {
-      const probe = await request.get('/admin/stocks/sync-status')
+      const probe = await adminStockApi.getSyncStatus()
       if (probe.code === 200) priorFinishedAt = probe.data?.finishedAt || null
     } catch (_) { priorFinishedAt = null }
 
-    const res = await request.post('/admin/stocks/sync-missing')
+    const res = await adminStockApi.syncMissing()
     if (res.code === 200) {
       ElMessage.success(res.msg || '补齐任务已启动')
       startPollSync()

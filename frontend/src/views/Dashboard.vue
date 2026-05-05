@@ -235,7 +235,9 @@ import {
   Wallet, Money, DataAnalysis, DataLine, TrendCharts,
   Refresh, PieChart, List, FullScreen, InfoFilled
 } from '@element-plus/icons-vue'
-import request from '../utils/request'
+import { getStockList } from '../api/market'
+import { getAsset, getAssetCurve } from '../api/user'
+import { getOrders, getDeals } from '../api/trade'
 
 // ============== 状态 ==============
 const loading = ref(false)
@@ -328,7 +330,7 @@ const recentOrdersByNo = ref({})
 // ============== 数据加载 ==============
 const loadStockMap = async () => {
   try {
-    const res = await request.get('/stock/list')
+    const res = await getStockList()
     if (res.code === 200) {
       const m = {}
       for (const s of res.data || []) m[s.stockCode] = s
@@ -339,7 +341,7 @@ const loadStockMap = async () => {
 
 const loadAsset = async () => {
   try {
-    const res = await request.get('/user/asset')
+    const res = await getAsset()
     if (res.code === 200) {
       asset.value.username = res.data.username
       asset.value.nickname = res.data.nickname
@@ -356,7 +358,7 @@ const loadAsset = async () => {
 const loadCurve = async () => {
   loadingCurve.value = true
   try {
-    const res = await request.get('/user/asset/curve', { params: { days: curveDays.value } })
+    const res = await getAssetCurve(curveDays.value)
     if (res.code === 200) {
       curve.value = res.data || []
       // 当日收益的"基数" = 最后一笔"非今天"的快照（即昨日真收盘）
@@ -389,8 +391,8 @@ const loadCurve = async () => {
 const loadDeals = async () => {
   try {
     const [dealsRes, ordersRes] = await Promise.all([
-      request.get('/trade/deals', { params: { page: 1, size: 10 } }),
-      request.get('/trade/orders', { params: { page: 1, size: 50 } })
+      getDeals({ page: 1, size: 10 }),
+      getOrders({ page: 1, size: 50 })
     ])
     if (dealsRes.code === 200) deals.value = dealsRes.data?.records || []
     if (ordersRes.code === 200) {
