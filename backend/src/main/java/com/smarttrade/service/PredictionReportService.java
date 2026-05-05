@@ -379,6 +379,7 @@ public class PredictionReportService {
         String v = version.toLowerCase();
         if (v.startsWith("xgb")) return "XGBoost";
         if (v.startsWith("lgbm") || v.startsWith("lgb")) return "LightGBM";
+        if (v.startsWith("lstm")) return "LSTM";
         return version;
     }
 

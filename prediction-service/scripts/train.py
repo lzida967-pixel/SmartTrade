@@ -32,22 +32,23 @@ from app.features.dataset import (  # noqa: E402
     save_dataset,
     time_split,
 )
-from app.models import lgbm_model, xgb_model  # noqa: E402
+from app.models import lgbm_model, lstm_model, xgb_model  # noqa: E402
 
 
 MODEL_REGISTRY = {
     "lgbm": ("LightGBM", lgbm_model),
     "xgb":  ("XGBoost",  xgb_model),
+    "lstm": ("LSTM",     lstm_model),
 }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="训练股票涨跌三分类模型")
-    parser.add_argument("--model", choices=["lgbm", "xgb", "both"], default="lgbm",
-                        help="选择训练模型: lgbm / xgb / both")
+    parser.add_argument("--model", choices=["lgbm", "xgb", "lstm", "both", "all"], default="lgbm",
+                        help="选择训练模型: lgbm / xgb / lstm / both(树模型) / all(全部)")
     parser.add_argument("--rebuild-dataset", action="store_true",
                         help="即使 dataset.parquet 已存在也强制重建")
-    parser.add_argument("--val-days", type=int, default=60, help="验证集天数")
+    parser.add_argument("--val-days", type=int, default=60, help="验证集天数（LSTM 默认自动扩大为 120）")
     parser.add_argument("--test-days", type=int, default=60, help="测试集天数")
     args = parser.parse_args()
 
@@ -62,25 +63,39 @@ def main() -> int:
 
     df = filter_for_training(df)
 
-    # 2. 时间切分
-    logger.info("=== 时间切分 ===")
-    train_df, val_df, test_df = time_split(df, val_days=args.val_days, test_days=args.test_days)
-    if len(val_df) == 0 or len(test_df) == 0:
-        logger.error("验证集或测试集为空，请检查数据时间范围")
-        return 1
-
     # 3-5. 逐个训练指定模型
-    targets = ["lgbm", "xgb"] if args.model == "both" else [args.model]
+    if args.model == "all":
+        targets = ["lgbm", "xgb", "lstm"]
+    elif args.model == "both":
+        targets = ["lgbm", "xgb"]
+    else:
+        targets = [args.model]
     summary: dict[str, dict] = {}
     for key in targets:
         name, mod = MODEL_REGISTRY[key]
+        # LSTM 使用更大的验证集，树模型用手动指定的 val_days
+        _val_days = 120 if getattr(mod, "SEQUENCE_BASED", False) and args.val_days == 60 else args.val_days
+        logger.info(f"=== 时间切分 (val_days={_val_days}) ===")
+        train_df, val_df, test_df = time_split(df, val_days=_val_days, test_days=args.test_days)
+        if len(val_df) == 0 or len(test_df) == 0:
+            logger.error("验证集或测试集为空，请检查数据时间范围")
+            return 1
         logger.info(f"=== 训练 {name} ===")
         result = mod.train(train_df, val_df)
 
         logger.info(f"=== {name} 测试集评估 ===")
-        X_test = test_df[result.feature_names].astype("float32")
-        y_test = test_df["label"].astype(int)
-        test_metrics = mod.evaluate(result.model, X_test, y_test, prefix=f"{key}/test")
+        if getattr(mod, "SEQUENCE_BASED", False):
+            from app.models.lstm_model import _build_sequences
+            X_test_seq, y_test_seq = _build_sequences(test_df, result.feature_names, mod.SEQ_LEN)
+            import numpy as _np
+            n = X_test_seq.shape[0]
+            f = X_test_seq.shape[2]
+            X_test_seq = result.scaler.transform(X_test_seq.reshape(-1, f)).reshape(n, mod.SEQ_LEN, f).astype("float32")
+            test_metrics = mod.evaluate(result.model, X_test_seq, y_test_seq, prefix=f"{key}/test")
+        else:
+            X_test = test_df[result.feature_names].astype("float32")
+            y_test = test_df["label"].astype(int)
+            test_metrics = mod.evaluate(result.model, X_test, y_test, prefix=f"{key}/test")
         result.metrics["test"] = test_metrics
 
         mod.save(result)

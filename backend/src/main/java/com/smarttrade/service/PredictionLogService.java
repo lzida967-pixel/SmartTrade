@@ -194,7 +194,7 @@ public class PredictionLogService {
             out.add(m);
         }
         // 保证至少有 lgbm/xgb 占位（哪怕 0 条），UI 不闪烁
-        for (String k : new String[]{"lgbm_v1", "xgb_v1"}) {
+        for (String k : new String[]{"lgbm_v1", "xgb_v1", "lstm_v1"}) {
             if (bucket.containsKey(k)) continue;
             Map<String, Object> m = new HashMap<>();
             m.put("modelVersion", k);
@@ -275,6 +275,7 @@ public class PredictionLogService {
         String v = version.toLowerCase();
         if (v.startsWith("xgb")) return "XGBoost";
         if (v.startsWith("lgbm") || v.startsWith("lgb")) return "LightGBM";
+        if (v.startsWith("lstm")) return "LSTM";
         return version;
     }
 }

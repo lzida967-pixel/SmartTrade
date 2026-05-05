@@ -33,10 +33,24 @@
               <el-icon><ChatDotRound /></el-icon>
               <span>AI 助手</span>
             </el-menu-item>
-            <el-menu-item index="/prediction">
-              <el-icon><MagicStick /></el-icon>
-              <span>智能预测</span>
-            </el-menu-item>
+            <el-sub-menu index="/prediction">
+              <template #title>
+                <el-icon><MagicStick /></el-icon>
+                <span>智能预测</span>
+              </template>
+              <el-menu-item index="/prediction">
+                <el-icon><TrendCharts /></el-icon>
+                <span>树模型预测</span>
+              </el-menu-item>
+              <el-menu-item index="/prediction/lstm">
+                <el-icon><Cpu /></el-icon>
+                <span>LSTM 序列预测</span>
+              </el-menu-item>
+              <el-menu-item index="/prediction/compare">
+                <el-icon><Connection /></el-icon>
+                <span>模型对比</span>
+              </el-menu-item>
+            </el-sub-menu>
           </el-menu>
         </el-aside>
         
@@ -151,7 +165,7 @@ import ProfileDialog from './components/ProfileDialog.vue'
 import { 
   TrendCharts, DataBoard, List, Wallet, 
   User, SwitchButton, ArrowRight,
-  ChatDotRound, Monitor, MagicStick
+  ChatDotRound, Monitor, MagicStick, Connection, Cpu
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

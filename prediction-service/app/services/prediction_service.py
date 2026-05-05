@@ -11,7 +11,7 @@ from loguru import logger
 from app.core.config import settings
 from app.data.realtime import fetch_recent
 from app.features.builder import FEATURE_COLUMNS, build_features
-from app.models import lgbm_model, xgb_model
+from app.models import lgbm_model, lstm_model, xgb_model
 from app.schemas import (
     BatchPredictionItem,
     BatchPredictionResponse,
@@ -24,6 +24,7 @@ from app.schemas import (
 MODEL_REGISTRY: dict[str, tuple[str, Any, str]] = {
     "lgbm": ("LightGBM", lgbm_model, "lgbm_v1"),
     "xgb":  ("XGBoost",  xgb_model,  "xgb_v1"),
+    "lstm": ("LSTM",     lstm_model,  "lstm_v1"),
 }
 DEFAULT_MODEL = "lgbm"
 
@@ -85,9 +86,13 @@ def predict_one(code: str, model_key: str | None = None) -> PredictionResponse:
         raise ValueError(f"股票 {code} 特征构造后全部为 NaN，可能停牌或数据异常")
 
     last_row = feat.iloc[[-1]]
-    X = last_row[feature_names].astype("float32")
 
-    proba = model.predict_proba(X)[0]
+    # ── 推理（树模型取最后一行；LSTM 取序列）──
+    if getattr(mod, "SEQUENCE_BASED", False):
+        proba = mod.infer(payload, feat)
+    else:
+        X = last_row[feature_names].astype("float32")
+        proba = model.predict_proba(X)[0]
     label = int(np.argmax(proba))
     confidence = float(proba[label])
 

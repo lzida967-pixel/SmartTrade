@@ -26,7 +26,7 @@ const codeInput = ref(route.query.code || '600519')
 const modelKey = ref('lgbm')  // 'lgbm' | 'xgb'
 const modelOptions = [
   { value: 'lgbm', label: 'LightGBM', desc: '默认 / 快速' },
-  { value: 'xgb',  label: 'XGBoost',  desc: '另一种树模型' },
+  { value: 'xgb',  label: 'XGBoost',  desc: '树模型对比' },
 ]
 const currentModelLabel = computed(() =>
   modelOptions.find(m => m.value === modelKey.value)?.label || 'LightGBM'
@@ -37,7 +37,7 @@ const error = ref('')
 
 // AI 报告相关状态（由 usePredictionSse composable 管理）
 const reportSse = usePredictionSse({
-  buildUrl: (code) => `/api/prediction/lgbm/${code}/report?model=${modelKey.value}`,
+  buildUrl: (code) => `/api/prediction/predict/${code}/report?model=${modelKey.value}`,
   errorHint: 'AI 报告生成失败',
   onBeforeStart: () => {
     if (!result.value) { ElMessage.warning('请先生成预测结果'); return false }
@@ -106,7 +106,7 @@ const fetchPrediction = async () => {
   loading.value = true
   error.value = ''
   try {
-    const res = await request.get(`/prediction/lgbm/${code}`, { params: { model: modelKey.value } })
+    const res = await request.get(`/prediction/predict/${code}`, { params: { model: modelKey.value } })
     result.value = res.data
     await nextTick()
     renderProbaChart()

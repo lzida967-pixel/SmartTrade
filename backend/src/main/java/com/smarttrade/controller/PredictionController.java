@@ -21,7 +21,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * LightGBM 实时预测网关：转发到外部 Python FastAPI 服务。
  *
  * 路径前缀：/prediction
- *   GET /prediction/lgbm/{code}             单只股票 T+5 三分类预测（?model=lgbm|xgb）
+ *   GET /prediction/predict/{code}          单只股票 T+5 三分类预测（?model=lgbm|xgb|lstm）
  *   GET /prediction/health                  预测服务健康状态
  */
 @Slf4j
@@ -38,7 +38,7 @@ public class PredictionController {
     @Autowired
     private PredictionLogService predictionLogService;
 
-    @GetMapping("/lgbm/{code}")
+    @GetMapping("/predict/{code}")
     @AuditLog(category = "PREDICTION", action = "PREDICT",
             targetType = "STOCK", target = "#code",
             summary = "预测 #{#code} (model=#{#model})",
@@ -71,7 +71,7 @@ public class PredictionController {
      * 阻塞 SseEmitter 被 Spring MVC 绑定到 response，导致 token 被缓冲、流式失效。
      * 审计记录改由 PredictionReportService 内部异步落库。
      */
-    @GetMapping(value = "/lgbm/{code}/report", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping(value = "/predict/{code}/report", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter report(
             @PathVariable("code") String code,
             @RequestParam(value = "model", required = false, defaultValue = "lgbm") String model,

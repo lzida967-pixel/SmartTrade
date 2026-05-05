@@ -33,7 +33,7 @@ public class PredictionClient {
     private long cacheTtlMs;
 
     private static final String DEFAULT_MODEL = "lgbm";
-    private static final java.util.Set<String> ALLOWED_MODELS = java.util.Set.of("lgbm", "xgb");
+    private static final java.util.Set<String> ALLOWED_MODELS = java.util.Set.of("lgbm", "xgb", "lstm");
 
     private final Map<String, CachedEntry> cache = new ConcurrentHashMap<>();
 
@@ -45,7 +45,7 @@ public class PredictionClient {
     }
 
     /**
-     * 单只股票预测，可指定模型 key（lgbm / xgb）。失败抛 IllegalStateException。
+     * 单只股票预测，可指定模型 key（lgbm / xgb / lstm）。失败抛 IllegalStateException。
      */
     public PredictionDTO predict(String stockCode, String modelKey) {
         if (!enabled) {

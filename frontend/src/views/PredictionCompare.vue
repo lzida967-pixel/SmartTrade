@@ -3,8 +3,8 @@
  * 模型对比页：同股同时间并排跑 LightGBM + XGBoost，量化两者分歧度
  *
  * 数据流：
- *   Promise.all([ /api/prediction/lgbm/{code}?model=lgbm,
- *                 /api/prediction/lgbm/{code}?model=xgb ])
+ *   Promise.all([ /api/prediction/predict/{code}?model=lgbm,
+ *                 /api/prediction/predict/{code}?model=xgb ])
  * 分歧度：
  *   - 标签一致性（同 / 异）
  *   - 置信度差 |c_lgbm - c_xgb|
@@ -80,8 +80,8 @@ const fetchCompare = async () => {
 
   try {
     const [a, b] = await Promise.allSettled([
-      request.get(`/prediction/lgbm/${code}`, { params: { model: 'lgbm' } }),
-      request.get(`/prediction/lgbm/${code}`, { params: { model: 'xgb'  } })
+      request.get(`/prediction/predict/${code}`, { params: { model: 'lgbm' } }),
+      request.get(`/prediction/predict/${code}`, { params: { model: 'xgb'  } })
     ])
     if (a.status === 'fulfilled') results.value.lgbm = a.value.data
     if (b.status === 'fulfilled') results.value.xgb  = b.value.data
@@ -93,7 +93,7 @@ const fetchCompare = async () => {
       ElMessage.warning('XGBoost 调用失败：' + (b.reason?.response?.data?.msg || ''))
     }
     await nextTick()
-    renderProbaCompareChart()
+    setTimeout(renderProbaCompareChart, 50)
   } finally {
     loading.value = false
   }
@@ -169,7 +169,7 @@ const renderProbaCompareChart = () => {
 
   probaCompareChart.setOption({
     backgroundColor: 'transparent',
-    legend: { data: ['LightGBM', 'XGBoost'], textStyle: { color: '#cbd5e1' }, top: 0 },
+    legend: { data: ['LightGBM', 'XGBoost'], textStyle: { color: '#cbd5e1' }, top: 4 },
     grid: { left: 60, right: 40, top: 40, bottom: 30 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
                valueFormatter: v => (v * 100).toFixed(1) + '%' },
@@ -195,6 +195,7 @@ const renderProbaCompareChart = () => {
                  color: '#a78bfa', fontSize: 11, fontWeight: 600 } }
     ]
   })
+  probaCompareChart.resize()
 }
 
 const onResize = () => probaCompareChart?.resize()
