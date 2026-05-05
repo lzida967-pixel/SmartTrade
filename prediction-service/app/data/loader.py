@@ -44,6 +44,16 @@ def bs_logout() -> None:
         logger.info("baostock 已退出")
 
 
+def bs_reset_login() -> None:
+    """连接被断开时，重置登录标记以便下次重新登录。"""
+    global _BS_LOGGED_IN
+    try:
+        bs.logout()
+    except Exception:
+        pass
+    _BS_LOGGED_IN = False
+
+
 def _to_bs_code(code: str) -> str:
     """6 位数字转 baostock 代码：sh.600519 / sz.000001 / bj.430510"""
     code = str(code).zfill(6)

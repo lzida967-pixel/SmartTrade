@@ -91,6 +91,7 @@ const fetchPrediction = async () => {
     await nextTick()
     renderProbaChart()
     renderFeatureChart()
+    renderKlineForecast()
   } catch (e) {
     error.value = e?.response?.data?.msg || '预测服务调用失败'
     result.value = null
@@ -103,8 +104,119 @@ const selectQuick = (code) => { codeInput.value = code; fetchPrediction() }
 
 let probaChart = null
 let featureChart = null
+let klineChart = null
 const probaChartRef = ref(null)
 const featureChartRef = ref(null)
+const klineChartRef = ref(null)
+const klineLoading = ref(false)
+
+const renderKlineForecast = async () => {
+  if (!klineChartRef.value || !result.value) return
+  klineLoading.value = true
+  let points = []
+  try {
+    const r = await request.get(`/stock/kline/${result.value.code}`, { params: { limit: 60 } })
+    if (r.code === 200) points = r.data || []
+  } catch (_) { /* ignore */ }
+  klineLoading.value = false
+  if (!points.length) return
+
+  if (!klineChart) klineChart = echarts.init(klineChartRef.value, 'dark')
+
+  const forwardDays = result.value.forwardDays || 5
+  const threshold   = result.value.threshold   || 0.03
+  const last        = points[points.length - 1]
+  const latestClose = Number(last.closePrice)
+  const upper       = latestClose * (1 + threshold)
+  const lower       = latestClose * (1 - threshold)
+
+  const dates    = points.map(p => p.tradeDate)
+  const futureXs = Array.from({ length: forwardDays }, (_, i) => `T+${i + 1}`)
+  const xs       = [...dates, ...futureXs]
+
+  const candles = points.map(p => [
+    Number(p.openPrice), Number(p.closePrice),
+    Number(p.lowPrice),  Number(p.highPrice),
+  ])
+  const data = [...candles, ...Array(forwardDays).fill('-')]
+
+  const ma = (n) => points.map((_, i) => {
+    if (i < n - 1) return '-'
+    let s = 0
+    for (let j = 0; j < n; j++) s += Number(points[i - j].closePrice)
+    return (s / n).toFixed(2)
+  }).concat(Array(forwardDays).fill('-'))
+
+  const yHi = Math.max(...points.map(p => Number(p.highPrice)), upper * 1.04)
+  const yLo = Math.min(...points.map(p => Number(p.lowPrice)),  lower * 0.96)
+
+  const conf = result.value.confidence || 0.5
+  const hotAlpha  = Math.min(0.42, 0.18 + conf * 0.4)
+  const coldAlpha = 0.07
+  const startX = xs[points.length - 1]
+  const endX   = xs[xs.length - 1]
+
+  const zones = [
+    { label: 0, ymin: upper, ymax: yHi,    color: '#ef4444' },
+    { label: 1, ymin: lower, ymax: upper,  color: '#fbbf24' },
+    { label: 2, ymin: yLo,   ymax: lower,  color: '#10b981' },
+  ]
+  const markAreaData = zones.map(z => [
+    { xAxis: startX, yAxis: z.ymin,
+      itemStyle: { color: z.color, opacity: z.label === result.value.label ? hotAlpha : coldAlpha } },
+    { xAxis: endX,   yAxis: z.ymax }
+  ])
+
+  klineChart.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 60, right: 90, top: 30, bottom: 45 },
+    legend: { data: ['日K', 'MA5', 'MA20'], textStyle: { color: '#94a3b8' }, top: 0 },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'cross' },
+      backgroundColor: 'rgba(20,20,25,0.92)', borderColor: '#2c2c33',
+      textStyle: { color: '#e5e7eb', fontSize: 12 },
+    },
+    xAxis: {
+      type: 'category', data: xs, boundaryGap: true,
+      axisLine:  { lineStyle: { color: '#3f3f46' } },
+      axisLabel: { color: '#94a3b8', fontSize: 10 },
+    },
+    yAxis: {
+      scale: true, min: yLo, max: yHi,
+      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.08)' } },
+      axisLabel: { color: '#94a3b8' },
+    },
+    dataZoom: [
+      { type: 'inside', start: 30, end: 100 },
+      { type: 'slider', height: 16, bottom: 6, start: 30, end: 100,
+        textStyle: { color: '#6b7280' }, borderColor: '#27272a',
+        fillerColor: 'rgba(167,139,250,0.18)' }
+    ],
+    series: [
+      {
+        name: '日K', type: 'candlestick', data,
+        itemStyle: { color: '#ef4444', color0: '#10b981', borderColor: '#ef4444', borderColor0: '#10b981' },
+        markArea: { silent: true, z: 0, data: markAreaData },
+        markLine: {
+          symbol: 'none', silent: true,
+          lineStyle: { type: 'dashed', width: 1 },
+          data: [
+            { yAxis: latestClose, lineStyle: { color: '#cbd5e1' },
+              label: { formatter: `现价 ${latestClose.toFixed(2)}`, color: '#cbd5e1', position: 'insideEndTop' } },
+            { yAxis: upper, lineStyle: { color: '#ef4444' },
+              label: { formatter: `+${(threshold*100).toFixed(0)}%  ${upper.toFixed(2)}`, color: '#ef4444', position: 'insideEndTop' } },
+            { yAxis: lower, lineStyle: { color: '#10b981' },
+              label: { formatter: `-${(threshold*100).toFixed(0)}%  ${lower.toFixed(2)}`, color: '#10b981', position: 'insideEndBottom' } },
+          ]
+        }
+      },
+      { name: 'MA5',  type: 'line', data: ma(5),  smooth: true, symbol: 'none',
+        lineStyle: { width: 1, color: '#818cf8' } },
+      { name: 'MA20', type: 'line', data: ma(20), smooth: true, symbol: 'none',
+        lineStyle: { width: 1, color: '#a78bfa' } },
+    ],
+  }, true)
+}
 
 const renderProbaChart = () => {
   if (!probaChartRef.value || !result.value) return
@@ -179,14 +291,14 @@ const renderFeatureChart = () => {
   })
 }
 
-const onResize = () => { probaChart?.resize(); featureChart?.resize() }
+const onResize = () => { probaChart?.resize(); featureChart?.resize(); klineChart?.resize() }
 onMounted(() => { window.addEventListener('resize', onResize); fetchPrediction() })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
-  probaChart?.dispose(); featureChart?.dispose()
+  probaChart?.dispose(); featureChart?.dispose(); klineChart?.dispose()
 })
 
-watch(() => result.value, () => nextTick(() => { renderProbaChart(); renderFeatureChart() }))
+watch(() => result.value, () => nextTick(() => { renderProbaChart(); renderFeatureChart(); renderKlineForecast() }))
 watch(() => route.query.code, (newCode) => {
   if (newCode && newCode !== codeInput.value) { codeInput.value = newCode; fetchPrediction() }
 })
@@ -300,6 +412,37 @@ watch(() => route.query.code, (newCode) => {
               <el-tag size="small" type="primary">{{ result.modelVersion }}</el-tag>
               <div class="text-xs text-gray-400 mt-1">模型版本</div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- K 线 + LSTM 预测目标区间 -->
+      <div class="rounded-2xl border border-violet-900/40 bg-violet-950/10" style="padding: 18px 22px;">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 class="text-base font-semibold flex items-center gap-2">
+            <el-icon class="text-violet-400"><TrendCharts /></el-icon>
+            K 线走势 · LSTM T+{{ result.forwardDays }} 预测目标区间
+          </h3>
+          <div class="flex items-center gap-3 text-[11px] text-gray-400 flex-wrap">
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-3 h-3 rounded" style="background:rgba(239,68,68,.3);border:1px solid rgba(239,68,68,.6)"></span>
+              看多区 (&gt; +{{ (result.threshold*100).toFixed(0) }}%)
+            </span>
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-3 h-3 rounded" style="background:rgba(251,191,36,.3);border:1px solid rgba(251,191,36,.6)"></span>
+              震荡区 (±{{ (result.threshold*100).toFixed(0) }}%)
+            </span>
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-3 h-3 rounded" style="background:rgba(16,185,129,.3);border:1px solid rgba(16,185,129,.6)"></span>
+              看空区 (&lt; -{{ (result.threshold*100).toFixed(0) }}%)
+            </span>
+            <span class="text-violet-400/80">| 高亮区域 = LSTM 预测目标</span>
+          </div>
+        </div>
+        <div class="relative">
+          <div ref="klineChartRef" class="w-full h-[380px]"></div>
+          <div v-if="klineLoading" class="absolute inset-0 flex items-center justify-center bg-black/30">
+            <el-icon class="animate-spin text-violet-400 text-2xl"><Loading /></el-icon>
           </div>
         </div>
       </div>

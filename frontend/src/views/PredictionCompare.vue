@@ -92,8 +92,7 @@ const fetchCompare = async () => {
     } else if (b.status === 'rejected') {
       ElMessage.warning('XGBoost 调用失败：' + (b.reason?.response?.data?.msg || ''))
     }
-    await nextTick()
-    setTimeout(renderProbaCompareChart, 50)
+    renderProbaCompareChart()
   } finally {
     loading.value = false
   }
@@ -157,11 +156,16 @@ const divergence = computed(() => {
 let probaCompareChart = null
 const probaCompareChartRef = ref(null)
 
-const renderProbaCompareChart = () => {
+const renderProbaCompareChart = async () => {
+  // 等一帧：v-if 新建 DOM 后需要浏览器完成 layout，否则 ECharts 会按 0 宽初始化
+  await nextTick()
+  await new Promise(r => requestAnimationFrame(r))
   if (!probaCompareChartRef.value) return
   const a = results.value.lgbm, b = results.value.xgb
   if (!a || !b) return
-  if (!probaCompareChart) probaCompareChart = echarts.init(probaCompareChartRef.value, 'dark')
+  // 每次都 dispose 旧实例：切换股票时旧 DOM 被 v-if 销毁，缓存实例指向悬空节点
+  if (probaCompareChart) { probaCompareChart.dispose(); probaCompareChart = null }
+  probaCompareChart = echarts.init(probaCompareChartRef.value, 'dark')
 
   const labels = ['看多', '震荡', '看空']
   const pa = [a.proba.bullish, a.proba.neutral, a.proba.bearish]

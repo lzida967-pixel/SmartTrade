@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     use_csi300: bool = True
     project_stocks_file: str = "project_stocks.txt"
 
+    # 数据库（baostock 失败时回退读取本地日 K 数据）
+    db_host: str = "127.0.0.1"
+    db_port: int = 3306
+    db_user: str = "root"
+    db_password: str = "123456"
+    db_name: str = "smart_trade"
+
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
