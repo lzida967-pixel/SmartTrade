@@ -95,6 +95,13 @@ public class StockMarketServiceImpl implements StockMarketService {
     @Autowired
     private StringRedisTemplate redisTemplate;
 
+    @Autowired
+    private com.smarttrade.service.CacheMetricsService cacheMetrics;
+
+    /** L3 终极兜底：本地 daily_price 表（外部双源都挂时使用） */
+    @Autowired
+    private com.smarttrade.service.StockDailyPriceService stockDailyPriceService;
+
     /**
      * 行情数据 Redis 缓存配置
      *   - 实时行情 30s：A 股最小 tick 不会比这更新得快，30s 命中率高且数据新鲜度可接受
@@ -320,12 +327,62 @@ public class StockMarketServiceImpl implements StockMarketService {
         } catch (Exception e) {
             log.warn("东方财富 K 线失败({}): {}，降级到新浪", stockCode, e.getMessage());
         }
-        // 兜底：新浪财经
+        // L2 兜底：新浪财经
         List<KlinePointVO> sinaList = fetchDailyKlineFromSina(stockCode, market, limit);
         if (sinaList != null && !sinaList.isEmpty()) {
             cacheSetList(klineCacheKey, sinaList, KLINE_CACHE_TTL);
+            return sinaList;
         }
-        return sinaList;
+        // L3 终极兜底：本地 daily_price 表（外部双源全部失败/超时时不让前端干等）
+        // 注意：本地数据可能比远程晚 1 个交易日（依赖定时同步任务），但保证可用性
+        // 缓存 TTL 缩短到 1min，让外部源恢复后能更快回到主路径
+        List<KlinePointVO> dbList = fetchDailyKlineFromDb(stockCode, limit);
+        if (dbList != null && !dbList.isEmpty()) {
+            log.warn("K 线双源全部失败，使用本地 daily_price 兜底: {} ({}条)", stockCode, dbList.size());
+            cacheSetList(klineCacheKey, dbList, Duration.ofMinutes(1));
+            return dbList;
+        }
+        return Collections.emptyList();
+    }
+
+    /**
+     * L3 兜底：从本地 stock_daily_price 表读取 K 线
+     *
+     * <p>使用场景：东方财富 + 新浪 全部不可用时（极少见）。
+     * 本地数据由定时任务每日同步入库，可能比实时源晚 1 个交易日，
+     * 但保证前端永远不会因为外部源故障而出现"K 线无法加载"的体验。
+     */
+    private List<KlinePointVO> fetchDailyKlineFromDb(String stockCode, int limit) {
+        try {
+            List<com.smarttrade.entity.StockDailyPrice> rows =
+                    stockDailyPriceService.listRecentByStock(stockCode, limit);
+            if (rows == null || rows.isEmpty()) return Collections.emptyList();
+            // listRecentByStock 是 trade_date desc，前端需要升序展示
+            List<KlinePointVO> list = new ArrayList<>(rows.size());
+            for (int i = rows.size() - 1; i >= 0; i--) {
+                com.smarttrade.entity.StockDailyPrice r = rows.get(i);
+                KlinePointVO vo = new KlinePointVO();
+                vo.setTradeDate(r.getTradeDate() == null ? null : r.getTradeDate().toString());
+                vo.setOpenPrice(r.getOpenPrice());
+                vo.setClosePrice(r.getClosePrice());
+                vo.setHighPrice(r.getHighPrice());
+                vo.setLowPrice(r.getLowPrice());
+                vo.setVolume(r.getVolume());
+                vo.setTurnoverAmount(r.getTurnoverAmount());
+                vo.setAmplitude(r.getAmplitude());
+                vo.setChangePercent(r.getChangePercent());
+                // 涨跌额：close - preClose（DB 没存 changeAmount，按定义算）
+                if (r.getClosePrice() != null && r.getPreClosePrice() != null) {
+                    vo.setChangeAmount(r.getClosePrice().subtract(r.getPreClosePrice()));
+                }
+                // 换手率 DB 没存，留 null
+                list.add(vo);
+            }
+            return list;
+        } catch (Exception e) {
+            log.error("DB 兜底读取 K 线失败: {} - {}", stockCode, e.getMessage());
+            return Collections.emptyList();
+        }
     }
 
     /**
@@ -766,10 +823,16 @@ public class StockMarketServiceImpl implements StockMarketService {
     private <T> T cacheGet(String key, Class<T> clazz) {
         try {
             String json = redisTemplate.opsForValue().get(key);
-            if (json == null || json.isEmpty()) return null;
-            return MAPPER.readValue(json, clazz);
+            if (json == null || json.isEmpty()) {
+                cacheMetrics.recordMiss(key);
+                return null;
+            }
+            T value = MAPPER.readValue(json, clazz);
+            cacheMetrics.recordHit(key);
+            return value;
         } catch (Exception e) {
             log.debug("读取缓存失败 {}: {}", key, e.getMessage());
+            cacheMetrics.recordMiss(key);
             return null;
         }
     }
@@ -786,12 +849,18 @@ public class StockMarketServiceImpl implements StockMarketService {
     private <T> List<T> cacheGetList(String key, Class<T> clazz) {
         try {
             String json = redisTemplate.opsForValue().get(key);
-            if (json == null || json.isEmpty()) return null;
-            return MAPPER.readValue(
+            if (json == null || json.isEmpty()) {
+                cacheMetrics.recordMiss(key);
+                return null;
+            }
+            List<T> value = MAPPER.readValue(
                     json,
                     MAPPER.getTypeFactory().constructCollectionType(List.class, clazz));
+            cacheMetrics.recordHit(key);
+            return value;
         } catch (Exception e) {
             log.debug("读取列表缓存失败 {}: {}", key, e.getMessage());
+            cacheMetrics.recordMiss(key);
             return null;
         }
     }

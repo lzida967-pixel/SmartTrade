@@ -7,7 +7,9 @@ import com.smarttrade.annotation.AuditLog;
 import com.smarttrade.common.Result;
 import com.smarttrade.entity.StockDailyPrice;
 import com.smarttrade.entity.StockInfo;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.smarttrade.service.AiPredictLogService;
+import com.smarttrade.service.CacheService;
 import com.smarttrade.service.StockDailyPriceService;
 import com.smarttrade.service.StockInfoService;
 import com.smarttrade.service.TradeDealService;
@@ -19,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -54,6 +57,15 @@ public class AdminStockController {
 
     @Autowired
     private AiPredictLogService aiPredictLogService;
+
+    @Autowired
+    private CacheService cacheService;
+
+    /** 股票池统计缓存：60s TTL，admin 增删股票时主动清除 */
+    private static final String KEY_STATS = "admin:stats:stocks";
+    /** /stock/list 接口的缓存 key（这里 admin 增删后也要清掉，保证前端股票池下拉框立即看到变化） */
+    private static final String KEY_STOCK_LIST = "stock:list:all";
+    private static final Duration STATS_TTL = Duration.ofSeconds(60);
 
     /**
      * 股票池分页列表（含每只股票的日 K 数据条数，便于发现"缺数据"股票）
@@ -128,17 +140,22 @@ public class AdminStockController {
      */
     @GetMapping("/stats")
     public Result<Map<String, Object>> stats() {
-        long total = stockInfoService.count();
-
-        QueryWrapper<StockDailyPrice> qw = new QueryWrapper<>();
-        qw.select("DISTINCT stock_code");
-        long withData = stockDailyPriceService.listObjs(qw).size();
-        long missing = Math.max(0L, total - withData);
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("total", total);
-        data.put("withData", withData);
-        data.put("missing", missing);
+        Map<String, Object> data = cacheService.getOrLoadByType(
+                KEY_STATS,
+                new TypeReference<Map<String, Object>>() {},
+                STATS_TTL,
+                () -> {
+                    long total = stockInfoService.count();
+                    QueryWrapper<StockDailyPrice> qw = new QueryWrapper<>();
+                    qw.select("DISTINCT stock_code");
+                    long withData = stockDailyPriceService.listObjs(qw).size();
+                    long missing = Math.max(0L, total - withData);
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("total", total);
+                    m.put("withData", withData);
+                    m.put("missing", missing);
+                    return m;
+                });
         return Result.success(data);
     }
 
@@ -159,6 +176,9 @@ public class AdminStockController {
         }
         stock.setCreatedAt(LocalDateTime.now());
         stockInfoService.save(stock);
+        // 写时清除：使下次 /stock/list 和 /admin/stocks/stats 请求重新加载最新数据
+        cacheService.evict(KEY_STOCK_LIST);
+        cacheService.evict(KEY_STATS);
         return Result.success(stock, "已加入股票池");
     }
 
@@ -211,6 +231,9 @@ public class AdminStockController {
         if (!ok) {
             return Result.error("删除失败");
         }
+        // 写时清除股票池与统计缓存
+        cacheService.evict(KEY_STOCK_LIST);
+        cacheService.evict(KEY_STATS);
         log.info("[管理后台] 已删除股票 {}", stockCode);
         return Result.success(null, "已删除");
     }
@@ -225,6 +248,8 @@ public class AdminStockController {
         new Thread(() -> {
             try {
                 int success = marketDataScheduler.syncAllStocks();
+                // 同步完成后清 stats 缓存：withData 可能变化
+                cacheService.evict(KEY_STATS);
                 log.info("[管理后台] 手动全量同步完成: {} 支", success);
             } catch (Exception e) {
                 log.error("[管理后台] 手动全量同步失败", e);
@@ -252,6 +277,8 @@ public class AdminStockController {
         new Thread(() -> {
             try {
                 int filled = marketDataScheduler.syncMissingStocks();
+                // 补齐完成后清 stats 缓存：missing / withData 计数变了
+                cacheService.evict(KEY_STATS);
                 log.info("[管理后台] 手动补齐完成: 新增 {} 支日线数据", filled);
             } catch (Exception e) {
                 log.error("[管理后台] 手动补齐失败", e);

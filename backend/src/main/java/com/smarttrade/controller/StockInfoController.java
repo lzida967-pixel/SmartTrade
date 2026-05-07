@@ -2,12 +2,14 @@ package com.smarttrade.controller;
 
 import com.smarttrade.common.Result;
 import com.smarttrade.entity.StockInfo;
+import com.smarttrade.service.CacheService;
 import com.smarttrade.service.StockInfoService;
 import com.smarttrade.service.StockMarketService;
 import com.smarttrade.vo.KlinePointVO;
 import com.smarttrade.vo.StockQuoteVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,12 +24,24 @@ public class StockInfoController {
     @Autowired
     private StockMarketService stockMarketService;
 
+    @Autowired
+    private CacheService cacheService;
+
+    /** 股票池列表缓存 key：全市场基础信息几乎不变，仅在 admin 增删股票时失效 */
+    private static final String KEY_STOCK_LIST = "stock:list:all";
+    private static final Duration STOCK_LIST_TTL = Duration.ofMinutes(5);
+
     /**
      * 股票池基础信息列表（不含实时行情）
+     *
+     * 5 分钟缓存：股票池数据极少变化，命中率可达 95%+，可大幅降低 MySQL 全表扫描压力
      */
     @GetMapping("/list")
     public Result<List<StockInfo>> list() {
-        return Result.success(stockInfoService.list());
+        List<StockInfo> data = cacheService.getOrLoadList(
+                KEY_STOCK_LIST, StockInfo.class, STOCK_LIST_TTL,
+                () -> stockInfoService.list());
+        return Result.success(data);
     }
 
     /**
@@ -103,6 +117,9 @@ public class StockInfoController {
     @PostMapping("/init")
     public Result<String> initMockData() {
         stockInfoService.initMockStocks();
+        // 初始化后股票池变动：清除列表 + 统计缓存
+        cacheService.evict(KEY_STOCK_LIST);
+        cacheService.evict("admin:stats:stocks");
         return Result.success("测试股票池初始化成功");
     }
 }

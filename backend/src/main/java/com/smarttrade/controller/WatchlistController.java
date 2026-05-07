@@ -2,6 +2,7 @@ package com.smarttrade.controller;
 
 import com.smarttrade.common.Result;
 import com.smarttrade.entity.UserWatchlist;
+import com.smarttrade.service.CacheService;
 import com.smarttrade.service.UserWatchlistService;
 import com.smarttrade.utils.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -24,15 +26,28 @@ public class WatchlistController {
     @Autowired
     private UserWatchlistService watchlistService;
 
+    @Autowired
+    private CacheService cacheService;
+
+    /** 自选股代码缓存 TTL：10 分钟，加 / 删时主动清除保证实时一致 */
+    private static final Duration CODES_TTL = Duration.ofMinutes(10);
+    /** 用户级缓存 key前缀： + userId */
+    private static final String KEY_CODES = "watchlist:codes:";
+
     /**
      * 当前用户的自选股代码列表（轻量版，给前端做 hashmap 用）
+     *
+     * 用户级缓存：高频调用（进行情、Market 页、Watchlist 页都会拉），
+     * 增/删后主动清除，可达到实时一致且命中率 80%+
      */
     @GetMapping("/codes")
     public Result<List<String>> codes() {
         Long userId = UserContext.getUserId();
-        List<String> codes = watchlistService.listByUser(userId).stream()
-                .map(UserWatchlist::getStockCode)
-                .toList();
+        String key = KEY_CODES + userId;
+        List<String> codes = cacheService.getOrLoadList(key, String.class, CODES_TTL,
+                () -> watchlistService.listByUser(userId).stream()
+                        .map(UserWatchlist::getStockCode)
+                        .toList());
         return Result.success(codes);
     }
 
@@ -52,6 +67,9 @@ public class WatchlistController {
     public Result<Boolean> add(@PathVariable("stockCode") String stockCode) {
         Long userId = UserContext.getUserId();
         boolean added = watchlistService.addWatchlist(userId, stockCode);
+        if (added) {
+            cacheService.evict(KEY_CODES + userId);  // 写时清除
+        }
         return Result.success(added, added ? "已加入自选" : "已在自选中");
     }
 
@@ -62,6 +80,9 @@ public class WatchlistController {
     public Result<Boolean> remove(@PathVariable("stockCode") String stockCode) {
         Long userId = UserContext.getUserId();
         boolean removed = watchlistService.removeWatchlist(userId, stockCode);
+        if (removed) {
+            cacheService.evict(KEY_CODES + userId);  // 写时清除
+        }
         return Result.success(removed, removed ? "已移除" : "未在自选中");
     }
 }

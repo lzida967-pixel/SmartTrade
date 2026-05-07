@@ -89,7 +89,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
 import {
-  Monitor, Odometer, User, Coin, List, Back, SwitchButton, Document, MagicStick
+  Monitor, Odometer, User, Coin, List, Back, SwitchButton, Document, MagicStick, DataBoard
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -102,7 +102,8 @@ const menus = [
   { path: '/admin/stocks', label: '股票池管理', icon: Coin },
   { path: '/admin/orders', label: '订单巡检', icon: List },
   { path: '/admin/audit',      label: '审计日志',    icon: Document    },
-  { path: '/admin/prediction', label: 'AI 准确率',   icon: MagicStick  }
+  { path: '/admin/prediction', label: 'AI 准确率',   icon: MagicStick  },
+  { path: '/admin/cache',      label: '缓存监控',     icon: DataBoard   }
 ]
 
 const currentMenu = computed(() => menus.find(m => route.path.startsWith(m.path)))

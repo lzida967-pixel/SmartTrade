@@ -44,6 +44,13 @@ mybatis-plus:
     # 打印 SQL 方便排查
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
+# 日志级别
+logging:
+  level:
+    # SSE / 异步流被客户端主动关闭时，Spring 会抛 AsyncRequestNotUsableException
+    # 这是用户切页/关弹窗的正常行为，非业务错误，压低到 ERROR 避免刷屏
+    org.springframework.web.servlet.mvc.method.annotation.DefaultHandlerExceptionResolver: ERROR
+
 # JWT 密钥配置 (需至少256位长)
 jwt:
   secret: a8f0a3g9k1m2n3p4q5r6s7t8u9v0w1x2y3z4A5B6C7D8E9F0G1H2I3J4K5L6M7N8O9P

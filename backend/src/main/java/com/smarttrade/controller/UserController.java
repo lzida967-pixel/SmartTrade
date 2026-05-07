@@ -10,6 +10,7 @@ import com.smarttrade.entity.User;
 import com.smarttrade.entity.UserAssetSnapshot;
 import com.smarttrade.service.AssetService;
 import com.smarttrade.service.AuditLogService;
+import com.smarttrade.service.CacheService;
 import com.smarttrade.service.UserService;
 import com.smarttrade.utils.UserContext;
 import com.smarttrade.vo.UserAssetVO;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +36,12 @@ public class UserController {
 
     @Autowired
     private AuditLogService auditLogService;
+
+    @Autowired
+    private CacheService cacheService;
+
+    /** 资产曲线缓存 TTL：60s，仅靠 TTL 失效 */
+    private static final Duration CURVE_TTL = Duration.ofSeconds(60);
 
     /**
      * 登录无法走 AOP（登录前没有 UserContext），手动写审计日志：
@@ -184,6 +192,11 @@ public class UserController {
     public Result<List<UserAssetSnapshot>> getAssetCurve(
             @RequestParam(value = "days", defaultValue = "30") Integer days) {
         Long userId = UserContext.getUserId();
-        return Result.success(assetService.getCurve(userId, days));
+        // 用户级缓存：key 含 userId + days，避免不同区间互覆盖
+        String key = "user:curve:" + userId + ":" + days;
+        List<UserAssetSnapshot> data = cacheService.getOrLoadList(
+                key, UserAssetSnapshot.class, CURVE_TTL,
+                () -> assetService.getCurve(userId, days));
+        return Result.success(data);
     }
 }

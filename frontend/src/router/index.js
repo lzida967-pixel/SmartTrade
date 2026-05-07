@@ -84,6 +84,11 @@ const routes = [
         path: 'prediction',
         name: 'AdminPrediction',
         component: () => import('../views/admin/AdminPrediction.vue')
+      },
+      {
+        path: 'cache',
+        name: 'AdminCache',
+        component: () => import('../views/admin/AdminCache.vue')
       }
     ]
   }
