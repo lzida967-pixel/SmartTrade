@@ -7,7 +7,9 @@
     4. 通知运行中的 FastAPI 服务热重载（可选）
 
 用法:
-    python scripts/update.py                       # 全量更新，两个模型都重训
+    python scripts/update.py                       # 默认 both: 重训 LGBM + XGB
+    python scripts/update.py --model all           # 重训全部三个模型 (LGBM + XGB + LSTM)
+    python scripts/update.py --model lstm          # 只重训 LSTM
     python scripts/update.py --model lgbm          # 只重训 LightGBM
     python scripts/update.py --model xgb           # 只重训 XGBoost
     python scripts/update.py --keep-cache          # 不删旧 parquet（增量补缺失股票）
@@ -88,8 +90,8 @@ def reload_fastapi(url: str, retries: int = 2) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="一键更新预测模型")
-    parser.add_argument("--model", choices=["lgbm", "xgb", "both"], default="both",
-                        help="重训哪些模型，默认 both")
+    parser.add_argument("--model", choices=["lgbm", "xgb", "lstm", "both", "all"], default="both",
+                        help="重训哪些模型: lgbm / xgb / lstm / both(树模型) / all(全部)，默认 both")
     parser.add_argument("--keep-cache", action="store_true",
                         help="不删除旧 parquet（增量补缺失股票）")
     parser.add_argument("--no-reload", action="store_true",
