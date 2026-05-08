@@ -32,3 +32,19 @@ export const reportStreamUrl = (code, model = 'lgbm') =>
  */
 export const compareReportStreamUrl = (code) =>
   `/api/prediction/compare/${code}/report`
+
+// ====================================================================
+// 模型实证评估（最近 N 天三模型准确率回顾）
+// ====================================================================
+
+/** 整体概览：三模型准确率 + 3×3 混淆矩阵 */
+export const getEvaluationOverview = (days = 30) =>
+  request.get('/prediction/evaluation/overview', { params: { days } })
+
+/** 按日时序：每个交易日的三模型准确率 */
+export const getEvaluationTimeline = (days = 30) =>
+  request.get('/prediction/evaluation/timeline', { params: { days } })
+
+/** 按股票排行：某模型最近 N 天命中率最高的股票 */
+export const getEvaluationByStock = (days = 30, model = 'lgbm_v1', limit = 20) =>
+  request.get('/prediction/evaluation/by-stock', { params: { days, model, limit } })

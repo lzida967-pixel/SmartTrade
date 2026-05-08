@@ -350,6 +350,9 @@ watch(() => route.query.code, (newCode) => {
       <el-divider direction="vertical" class="!mx-2" />
       <el-button round plain size="small" @click="goTree">树模型预测</el-button>
       <el-button round plain size="small" @click="goCompare">模型对比</el-button>
+      <el-button round plain size="small" @click="$router.push('/prediction/evaluation')">
+        <el-icon class="mr-1"><Trophy /></el-icon>实证回顾
+      </el-button>
       <el-divider direction="vertical" class="!mx-2" />
       <span class="text-xs text-gray-500 mr-1">常用：</span>
       <el-tag

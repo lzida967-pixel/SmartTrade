@@ -247,6 +247,9 @@ watch(() => route.query.code, (c) => {
       <el-button round plain size="small" @click="goSingle">
         <el-icon class="mr-1"><Back /></el-icon>返回单模型模式
       </el-button>
+      <el-button round plain size="small" @click="$router.push('/prediction/evaluation')">
+        <el-icon class="mr-1"><Trophy /></el-icon>实证回顾
+      </el-button>
       <el-divider direction="vertical" class="!mx-3" />
       <span class="text-xs text-gray-500 mr-1">常用：</span>
       <el-tag

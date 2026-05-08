@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.smarttrade.dto.PredictionDTO;
 import com.smarttrade.entity.AiPredictLog;
 import com.smarttrade.entity.StockDailyPrice;
+import com.smarttrade.entity.StockInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,6 +45,9 @@ public class PredictionLogService {
 
     @Autowired
     private StockDailyPriceService stockDailyPriceService;
+
+    @Autowired
+    private StockInfoService stockInfoService;
 
     /** 轻量持久化线程池，避免每次 saveAsync 都新建 Executor。 */
     @Autowired
@@ -211,20 +215,180 @@ public class PredictionLogService {
     }
 
     // ============================================================
+    // 4. 深度统计：混淆矩阵 / 按日时序 / 按股票排行
+    // ============================================================
+
+    /**
+     * 整体概览：返回各模型的准确率、样本量、3×3 混淆矩阵。
+     * <p>矩阵约定：行=实际标签（0=看多/1=震荡/2=看空），列=预测标签。
+     */
+    public Map<String, Object> computeOverview(int days) {
+        LocalDate since = LocalDate.now().minusDays(Math.max(days, 1));
+        List<AiPredictLog> rows = aiPredictLogService.list(
+                new LambdaQueryWrapper<AiPredictLog>()
+                        .eq(AiPredictLog::getIsVerified, 1)
+                        .ge(AiPredictLog::getTargetDate, since));
+
+        // model -> { matrix[3][3], correct, total }
+        Map<String, int[][]> matrices = new HashMap<>();
+        Map<String, int[]> counts = new HashMap<>();
+        for (AiPredictLog r : rows) {
+            Integer pred = signalToLabel(r.getPredictSignal());
+            Integer actual = computeActualLabel(r);
+            if (pred == null || actual == null) continue;
+            String mv = r.getModelVersion() == null ? "unknown" : r.getModelVersion();
+            int[][] m = matrices.computeIfAbsent(mv, k -> new int[3][3]);
+            int[] c = counts.computeIfAbsent(mv, k -> new int[]{0, 0});
+            m[actual][pred]++;
+            c[1]++;
+            if (pred.equals(actual)) c[0]++;
+        }
+
+        List<Map<String, Object>> models = new ArrayList<>();
+        for (String key : new String[]{"lgbm_v1", "xgb_v1", "lstm_v1"}) {
+            int[][] m = matrices.getOrDefault(key, new int[3][3]);
+            int[] c = counts.getOrDefault(key, new int[]{0, 0});
+            int correct = c[0], total = c[1];
+            double acc = total == 0 ? 0.0 : correct * 1.0 / total;
+            Map<String, Object> info = new HashMap<>();
+            info.put("modelVersion", key);
+            info.put("modelName", modelDisplayName(key));
+            info.put("verifiedCount", total);
+            info.put("correctCount", correct);
+            info.put("accuracy", BigDecimal.valueOf(acc).setScale(4, RoundingMode.HALF_UP));
+            info.put("confusionMatrix", m);  // 3x3
+            models.add(info);
+        }
+
+        Long pending = aiPredictLogService.getBaseMapper().selectCount(
+                new LambdaQueryWrapper<AiPredictLog>().eq(AiPredictLog::getIsVerified, 0));
+        Map<String, Object> out = new HashMap<>();
+        out.put("days", days);
+        out.put("pendingCount", pending);
+        out.put("models", models);
+        out.put("labelNames", new String[]{"看多", "震荡", "看空"});
+        return out;
+    }
+
+    /**
+     * 按日时序：返回最近 N 天每个交易日各模型的准确率。
+     * <p>用于绘制"模型准确率随时间变化"的折线图。
+     */
+    public List<Map<String, Object>> computeTimeline(int days) {
+        LocalDate since = LocalDate.now().minusDays(Math.max(days, 1));
+        List<AiPredictLog> rows = aiPredictLogService.list(
+                new LambdaQueryWrapper<AiPredictLog>()
+                        .eq(AiPredictLog::getIsVerified, 1)
+                        .ge(AiPredictLog::getTargetDate, since)
+                        .orderByAsc(AiPredictLog::getTargetDate));
+
+        // (date, model) -> [correct, total]
+        Map<LocalDate, Map<String, int[]>> byDate = new java.util.TreeMap<>();
+        for (AiPredictLog r : rows) {
+            Integer pred = signalToLabel(r.getPredictSignal());
+            Integer actual = computeActualLabel(r);
+            if (pred == null || actual == null) continue;
+            String mv = r.getModelVersion() == null ? "unknown" : r.getModelVersion();
+            Map<String, int[]> sub = byDate.computeIfAbsent(r.getTargetDate(), k -> new HashMap<>());
+            int[] c = sub.computeIfAbsent(mv, k -> new int[]{0, 0});
+            c[1]++;
+            if (pred.equals(actual)) c[0]++;
+        }
+
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map.Entry<LocalDate, Map<String, int[]>> e : byDate.entrySet()) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("date", e.getKey().toString());
+            for (String key : new String[]{"lgbm_v1", "xgb_v1", "lstm_v1"}) {
+                int[] c = e.getValue().getOrDefault(key, new int[]{0, 0});
+                row.put(key + "_total", c[1]);
+                row.put(key + "_correct", c[0]);
+                row.put(key + "_accuracy", c[1] == 0 ? null
+                        : BigDecimal.valueOf(c[0] * 1.0 / c[1]).setScale(4, RoundingMode.HALF_UP));
+            }
+            out.add(row);
+        }
+        return out;
+    }
+
+    /**
+     * 按股票准确率排行：返回某模型最近 N 天命中率最高的股票。
+     */
+    public List<Map<String, Object>> computeByStock(int days, String modelVersion, int limit) {
+        LocalDate since = LocalDate.now().minusDays(Math.max(days, 1));
+        LambdaQueryWrapper<AiPredictLog> wrapper = new LambdaQueryWrapper<AiPredictLog>()
+                .eq(AiPredictLog::getIsVerified, 1)
+                .ge(AiPredictLog::getTargetDate, since);
+        if (modelVersion != null && !modelVersion.isBlank()) {
+            wrapper.eq(AiPredictLog::getModelVersion, modelVersion);
+        }
+        List<AiPredictLog> rows = aiPredictLogService.list(wrapper);
+
+        Map<String, int[]> byCode = new HashMap<>();  // code -> [correct, total]
+        for (AiPredictLog r : rows) {
+            Integer pred = signalToLabel(r.getPredictSignal());
+            Integer actual = computeActualLabel(r);
+            if (pred == null || actual == null) continue;
+            int[] c = byCode.computeIfAbsent(r.getStockCode(), k -> new int[]{0, 0});
+            c[1]++;
+            if (pred.equals(actual)) c[0]++;
+        }
+
+        List<Map<String, Object>> out = new ArrayList<>();
+        List<String> codes = new ArrayList<>();
+        for (Map.Entry<String, int[]> e : byCode.entrySet()) {
+            int correct = e.getValue()[0], total = e.getValue()[1];
+            // 至少 3 条样本才纳入排行，避免 1/1=100% 的噪声
+            if (total < 3) continue;
+            Map<String, Object> m = new HashMap<>();
+            m.put("stockCode", e.getKey());
+            m.put("verifiedCount", total);
+            m.put("correctCount", correct);
+            m.put("accuracy", BigDecimal.valueOf(correct * 1.0 / total).setScale(4, RoundingMode.HALF_UP));
+            out.add(m);
+            codes.add(e.getKey());
+        }
+        // 一次性 join 出 stockName
+        if (!codes.isEmpty()) {
+            Map<String, String> nameMap = new HashMap<>();
+            for (StockInfo s : stockInfoService.list(
+                    new LambdaQueryWrapper<StockInfo>().in(StockInfo::getStockCode, codes))) {
+                nameMap.put(s.getStockCode(), s.getStockName());
+            }
+            for (Map<String, Object> m : out) {
+                m.put("stockName", nameMap.getOrDefault(m.get("stockCode"), ""));
+            }
+        }
+        // 准确率降序，相同时样本量降序
+        out.sort((a, b) -> {
+            int cmp = ((BigDecimal) b.get("accuracy")).compareTo((BigDecimal) a.get("accuracy"));
+            if (cmp != 0) return cmp;
+            return Integer.compare((Integer) b.get("verifiedCount"), (Integer) a.get("verifiedCount"));
+        });
+        if (limit > 0 && out.size() > limit) out = out.subList(0, limit);
+        return out;
+    }
+
+    // ============================================================
     // 工具方法
     // ============================================================
 
     /** 该预测是否正确：实际三分类 == 预测三分类 */
     private boolean isPredictionCorrect(AiPredictLog r) {
+        Integer pred = signalToLabel(r.getPredictSignal());
+        Integer actual = computeActualLabel(r);
+        return pred != null && pred.equals(actual);
+    }
+
+    /** 计算实际三分类标签：0=看多, 1=震荡, 2=看空。无法计算返回 null。 */
+    private Integer computeActualLabel(AiPredictLog r) {
+        if (r.getActualPrice() == null || r.getPredictPrice() == null
+                || r.getPredictPrice().signum() <= 0) return null;
         BigDecimal ret = r.getActualPrice().subtract(r.getPredictPrice())
                 .divide(r.getPredictPrice(), 6, RoundingMode.HALF_UP);
-        int actualLabel;
-        if (ret.compareTo(THRESHOLD) > 0) actualLabel = 0;
-        else if (ret.compareTo(THRESHOLD.negate()) < 0) actualLabel = 2;
-        else actualLabel = 1;
-
-        Integer predLabel = signalToLabel(r.getPredictSignal());
-        return predLabel != null && predLabel == actualLabel;
+        if (ret.compareTo(THRESHOLD) > 0) return 0;
+        if (ret.compareTo(THRESHOLD.negate()) < 0) return 2;
+        return 1;
     }
 
     /** 找该股票 <= 指定日期的最近一根日 K 收盘价。 */

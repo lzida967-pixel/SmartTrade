@@ -50,6 +50,11 @@ const routes = [
     component: () => import('../views/PredictionLSTM.vue')
   },
   {
+    path: '/prediction/evaluation',
+    name: 'PredictionEvaluation',
+    component: () => import('../views/PredictionEvaluation.vue')
+  },
+  {
     path: '/admin',
     component: () => import('../views/SystemAdmin.vue'),
     meta: { requireAdmin: true, hideLayout: true },
