@@ -25,7 +25,7 @@ import { usePredictionSse } from '../composables/usePredictionSse'
 const route = useRoute()
 const router = useRouter()
 
-const codeInput = ref(route.query.code || '600519')
+const codeInput = ref(route.query.code || '000066')
 const loading = ref(false)
 const error = ref('')
 const results = ref({ lgbm: null, xgb: null })

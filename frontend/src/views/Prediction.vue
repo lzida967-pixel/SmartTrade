@@ -22,8 +22,8 @@ import { usePredictionSse } from '../composables/usePredictionSse'
 const route = useRoute()
 const router = useRouter()
 const goCompare = () => router.push({ path: '/prediction/compare', query: { code: codeInput.value } })
-// 支持从 URL query 读取股票代码（如 /prediction?code=600519）
-const codeInput = ref(route.query.code || '600519')
+// 支持从 URL query 读取股票代码（如 /prediction?code=000066）
+const codeInput = ref(route.query.code || '000066')
 const modelKey = ref('lgbm')  // 'lgbm' | 'xgb'
 const modelOptions = [
   { value: 'lgbm', label: 'LightGBM', desc: '默认 / 快速' },
