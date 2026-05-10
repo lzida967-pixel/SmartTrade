@@ -248,4 +248,33 @@ CREATE TABLE IF NOT EXISTS `zidatrade_audit_log` (
   KEY `idx_zidatrade_audit_target` (`target_type`, `target_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='操作审计日志';
 
+-- ----------------------------
+-- 11. AI 对话会话表 `zidatrade_ai_chat_session`
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `zidatrade_ai_chat_session` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint NOT NULL COMMENT '所属用户ID',
+  `title` varchar(100) NOT NULL DEFAULT '新对话' COMMENT '会话标题',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `idx_ai_session_user` (`user_id`, `updated_at`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 助手对话会话';
+
+-- ----------------------------
+-- 12. AI 对话消息表 `zidatrade_ai_chat_message`
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `zidatrade_ai_chat_message` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `session_id` bigint NOT NULL COMMENT '所属会话ID',
+  `user_id` bigint NOT NULL COMMENT '所属用户ID（冗余，方便直查）',
+  `role` varchar(20) NOT NULL COMMENT '消息角色：user / assistant',
+  `content` mediumtext NOT NULL COMMENT '消息正文',
+  `reasoning` mediumtext DEFAULT NULL COMMENT '思考型模型的推理过程（可为空）',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `idx_ai_msg_session` (`session_id`) USING BTREE,
+  KEY `idx_ai_msg_user` (`user_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 助手对话消息';
+
 SET FOREIGN_KEY_CHECKS = 1;

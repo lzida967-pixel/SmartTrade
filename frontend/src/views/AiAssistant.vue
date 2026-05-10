@@ -1,159 +1,223 @@
 <template>
   <div class="ai-page">
-    <!-- 顶部条 -->
-    <header class="ai-topbar">
-      <div class="flex items-center gap-3 min-w-0">
-        <div class="ai-brand-icon">
-          <el-icon><ChatDotRound /></el-icon>
-        </div>
-        <div class="min-w-0">
-          <div class="ai-brand-title">小智 · AI 投资助手</div>
-          <div class="ai-brand-sub">
-            <span class="status-dot"></span>
-            <span>基于通义千问 · 投资问答 · 技术指标 · 交易常识</span>
-          </div>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <el-button v-if="streaming" type="danger" plain size="small" @click="stopStream">
-          <el-icon class="mr-1"><CircleClose /></el-icon>停止生成
-        </el-button>
-        <el-button :disabled="streaming || !messages.length" plain size="small" @click="clearChat">
-          <el-icon class="mr-1"><Delete /></el-icon>清空对话
-        </el-button>
-      </div>
-    </header>
 
-    <!-- 消息列表 -->
-    <div ref="scrollRef" class="ai-scroll">
-      <div class="ai-thread">
-        <!-- 空状态 -->
-        <div v-if="!messages.length" class="ai-empty">
-          <div class="ai-empty-hero">
-            <div class="ai-empty-orb">
-              <el-icon class="text-3xl"><ChatDotRound /></el-icon>
-            </div>
-            <h3>你好，我是小智 👋</h3>
-            <p>问我关于股票、技术指标、交易常识的任何问题</p>
+    <!-- 左侧会话侧边栏 -->
+    <aside class="ai-sidebar" :class="{ collapsed: sidebarCollapsed }">
+      <div class="sidebar-header">
+        <button class="new-chat-btn" @click="newSession" :disabled="streaming">
+          <el-icon><Plus /></el-icon>
+          <span v-if="!sidebarCollapsed">新对话</span>
+        </button>
+        <button class="collapse-btn" @click="sidebarCollapsed = !sidebarCollapsed">
+          <el-icon><Fold v-if="!sidebarCollapsed" /><Expand v-else /></el-icon>
+        </button>
+      </div>
+      <div v-if="!sidebarCollapsed" class="session-list">
+        <div v-if="sessionsLoading" class="session-loading">加载中…</div>
+        <div v-else-if="!sessions.length" class="session-empty">暂无会话</div>
+        <div v-for="s in sessions" :key="s.id"
+             class="session-item" :class="{ active: currentSessionId === s.id }"
+             @click="switchSession(s.id)">
+          <el-icon class="session-icon"><ChatDotRound /></el-icon>
+          <div class="session-info" v-if="editingSessionId !== s.id">
+            <div class="session-title">{{ s.title }}</div>
           </div>
-          <div class="ai-suggest-grid">
-            <button v-for="(s, idx) in suggestions" :key="idx"
-                    class="ai-suggest" @click="askQuick(s.q)">
-              <div class="ai-suggest-icon" :style="{ background: s.bg, color: s.color }">
-                <el-icon><component :is="s.icon" /></el-icon>
-              </div>
-              <div class="ai-suggest-text">
-                <div class="ai-suggest-title">{{ s.title }}</div>
-                <div class="ai-suggest-q">{{ s.q }}</div>
-              </div>
-              <el-icon class="ai-suggest-arrow"><ArrowRight /></el-icon>
+          <el-input v-else v-model="editingTitle" size="small" class="session-edit-input"
+                    @keydown.enter.prevent="saveRename(s.id)"
+                    @keydown.esc="cancelRename"
+                    @blur="saveRename(s.id)"
+                    autofocus />
+          <div class="session-actions" @click.stop>
+            <button class="sess-action-btn" title="重命名" @click="startRename(s)">
+              <el-icon><Edit /></el-icon>
+            </button>
+            <button class="sess-action-btn danger" title="删除" @click="removeSession(s.id)">
+              <el-icon><Delete /></el-icon>
             </button>
           </div>
         </div>
+      </div>
+    </aside>
 
-        <!-- 对话气泡 -->
-        <div v-for="(m, i) in messages" :key="i"
-             class="ai-row" :class="m.role === 'user' ? 'is-user' : 'is-bot'">
-          <div class="ai-avatar" :class="m.role === 'user' ? 'is-user' : 'is-bot'">
-            <span v-if="m.role === 'user'">{{ userChar }}</span>
-            <el-icon v-else><ChatDotRound /></el-icon>
+    <!-- 右侧聊天主区 -->
+    <div class="ai-main">
+      <!-- 顶部条 -->
+      <header class="ai-topbar">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="ai-brand-icon">
+            <el-icon><ChatDotRound /></el-icon>
           </div>
-          <div class="ai-bubble-wrap">
-            <div class="ai-meta">
-              <span class="ai-meta-name">{{ m.role === 'user' ? userName : '小智' }}</span>
-              <span v-if="m.streaming" class="ai-meta-streaming">生成中…</span>
+          <div class="min-w-0">
+            <div class="ai-brand-title">{{ currentSession ? currentSession.title : '小智 · AI 投资助手' }}</div>
+            <div class="ai-brand-sub">
+              <span class="status-dot"></span>
+              <span>基于通义千问 · 投资问答 · 技术指标 · 交易常识</span>
             </div>
-            <div class="ai-bubble" :class="m.role === 'user' ? 'is-user' : 'is-bot'">
-              <!-- 思考过程（仅思考型模型有） -->
-              <details v-if="m.reasoning" class="ai-reasoning">
-                <summary>
-                  <el-icon class="mr-1"><Cpu /></el-icon>
-                  <span>思考过程</span>
-                  <span class="ai-reasoning-len">{{ m.reasoning.length }} 字</span>
-                </summary>
-                <div class="ai-reasoning-body" v-html="renderMarkdown(m.reasoning)"></div>
-              </details>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <el-button v-if="streaming" type="danger" plain size="small" @click="stopStream">
+            <el-icon class="mr-1"><CircleClose /></el-icon>停止生成
+          </el-button>
+          <el-button :disabled="streaming || !messages.length" plain size="small" @click="clearMessages">
+            <el-icon class="mr-1"><Delete /></el-icon>清空消息
+          </el-button>
+        </div>
+      </header>
 
-              <!-- 主要内容 -->
-              <div v-if="m.content" class="ai-content"
-                   :class="{ 'is-streaming': m.streaming }"
-                   v-html="renderMarkdown(m.content)"></div>
-              <div v-else-if="m.streaming && !m.reasoning" class="ai-thinking">
-                <span class="ai-dot"></span><span class="ai-dot"></span><span class="ai-dot"></span>
-                <span class="ai-thinking-text">正在思考</span>
+      <!-- 消息列表 -->
+      <div ref="scrollRef" class="ai-scroll">
+        <div class="ai-thread">
+          <!-- 空状态 -->
+          <div v-if="!messages.length && !messagesLoading" class="ai-empty">
+            <div class="ai-empty-hero">
+              <div class="ai-empty-orb">
+                <el-icon class="text-3xl"><ChatDotRound /></el-icon>
+              </div>
+              <h3>你好，我是小智 👋</h3>
+              <p>问我关于股票、技术指标、交易常识的任何问题</p>
+            </div>
+            <div class="ai-suggest-grid">
+              <button v-for="(s, idx) in suggestions" :key="idx"
+                      class="ai-suggest" @click="askQuick(s.q)">
+                <div class="ai-suggest-icon" :style="{ background: s.bg, color: s.color }">
+                  <el-icon><component :is="s.icon" /></el-icon>
+                </div>
+                <div class="ai-suggest-text">
+                  <div class="ai-suggest-title">{{ s.title }}</div>
+                  <div class="ai-suggest-q">{{ s.q }}</div>
+                </div>
+                <el-icon class="ai-suggest-arrow"><ArrowRight /></el-icon>
+              </button>
+            </div>
+          </div>
+
+          <!-- 消息加载中 -->
+          <div v-if="messagesLoading" class="msgs-loading">加载消息…</div>
+
+          <!-- 对话气泡 -->
+          <div v-for="(m, i) in messages" :key="i"
+               class="ai-row" :class="m.role === 'user' ? 'is-user' : 'is-bot'">
+            <div class="ai-avatar" :class="m.role === 'user' ? 'is-user' : 'is-bot'">
+              <span v-if="m.role === 'user'">{{ userChar }}</span>
+              <el-icon v-else><ChatDotRound /></el-icon>
+            </div>
+            <div class="ai-bubble-wrap">
+              <div class="ai-meta">
+                <span class="ai-meta-name">{{ m.role === 'user' ? userName : '小智' }}</span>
+                <span v-if="m.streaming" class="ai-meta-streaming">生成中…</span>
+              </div>
+              <div class="ai-bubble" :class="m.role === 'user' ? 'is-user' : 'is-bot'">
+                <!-- 思考过程（仅思考型模型有） -->
+                <details v-if="m.reasoning" class="ai-reasoning">
+                  <summary>
+                    <el-icon class="mr-1"><Cpu /></el-icon>
+                    <span>思考过程</span>
+                    <span class="ai-reasoning-len">{{ m.reasoning.length }} 字</span>
+                  </summary>
+                  <div class="ai-reasoning-body" v-html="renderMarkdown(m.reasoning)"></div>
+                </details>
+
+                <!-- 主要内容 -->
+                <div v-if="m.content" class="ai-content"
+                     :class="{ 'is-streaming': m.streaming }"
+                     v-html="renderMarkdown(m.content)"></div>
+                <div v-else-if="m.streaming && !m.reasoning" class="ai-thinking">
+                  <span class="ai-dot"></span><span class="ai-dot"></span><span class="ai-dot"></span>
+                  <span class="ai-thinking-text">正在思考</span>
+                </div>
+
+                <div v-if="m.error" class="ai-error">
+                  <el-icon><Warning /></el-icon>{{ m.error }}
+                </div>
               </div>
 
-              <div v-if="m.error" class="ai-error">
-                <el-icon><Warning /></el-icon>{{ m.error }}
+              <!-- 助手消息底部操作栏 -->
+              <div v-if="m.role === 'assistant' && !m.streaming && m.content" class="ai-actions">
+                <button class="ai-action-btn" @click="copyText(m.content)" title="复制全文">
+                  <el-icon><CopyDocument /></el-icon>
+                  <span>复制</span>
+                </button>
+                <button v-if="i === messages.length - 1"
+                        class="ai-action-btn" @click="regenerate" title="基于上一条问题重新生成">
+                  <el-icon><RefreshRight /></el-icon>
+                  <span>重新生成</span>
+                </button>
               </div>
-            </div>
-
-            <!-- 助手消息底部操作栏 -->
-            <div v-if="m.role === 'assistant' && !m.streaming && m.content" class="ai-actions">
-              <button class="ai-action-btn" @click="copyText(m.content)" title="复制全文">
-                <el-icon><CopyDocument /></el-icon>
-                <span>复制</span>
-              </button>
-              <button v-if="i === messages.length - 1"
-                      class="ai-action-btn" @click="regenerate" title="基于上一条问题重新生成">
-                <el-icon><RefreshRight /></el-icon>
-                <span>重新生成</span>
-              </button>
             </div>
           </div>
         </div>
       </div>
+
+      <!-- 输入栏 -->
+      <footer class="ai-inputbar">
+        <div class="ai-input-wrap">
+          <el-input
+            v-model="input"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 6 }"
+            :placeholder="streaming ? '正在生成中…' : '输入你的问题（Enter 发送，Shift+Enter 换行）'"
+            :disabled="streaming"
+            resize="none"
+            class="ai-input"
+            @keydown.enter.exact.prevent="send"
+            @keydown.enter.shift.exact="onShiftEnter"
+          />
+          <div class="ai-input-meta">
+            <span class="ai-counter" :class="{ 'is-warn': input.length > 1500 }">
+              {{ input.length }} 字
+            </span>
+            <button class="ai-send-btn" :disabled="!input.trim() || streaming" @click="send">
+              <el-icon v-if="!streaming"><Promotion /></el-icon>
+              <el-icon v-else class="is-spin"><Loading /></el-icon>
+              <span>{{ streaming ? '生成中' : '发送' }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="ai-disclaimer">
+          AI 生成内容仅供参考，不构成投资建议
+        </div>
+      </footer>
     </div>
 
-    <!-- 输入栏 -->
-    <footer class="ai-inputbar">
-      <div class="ai-input-wrap">
-        <el-input
-          v-model="input"
-          type="textarea"
-          :autosize="{ minRows: 1, maxRows: 6 }"
-          :placeholder="streaming ? '正在生成中…' : '输入你的问题（Enter 发送，Shift+Enter 换行）'"
-          :disabled="streaming"
-          resize="none"
-          class="ai-input"
-          @keydown.enter.exact.prevent="send"
-          @keydown.enter.shift.exact="onShiftEnter"
-        />
-        <div class="ai-input-meta">
-          <span class="ai-counter" :class="{ 'is-warn': input.length > 1500 }">
-            {{ input.length }} 字
-          </span>
-          <button class="ai-send-btn" :disabled="!input.trim() || streaming" @click="send">
-            <el-icon v-if="!streaming"><Promotion /></el-icon>
-            <el-icon v-else class="is-spin"><Loading /></el-icon>
-            <span>{{ streaming ? '生成中' : '发送' }}</span>
-          </button>
-        </div>
-      </div>
-      <div class="ai-disclaimer">
-        AI 生成内容仅供参考，不构成投资建议
-      </div>
-    </footer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, onMounted, onUnmounted, markRaw } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ChatDotRound, Delete, CircleClose, Promotion, Cpu, ArrowRight,
   Warning, CopyDocument, RefreshRight, Loading,
+  Plus, Fold, Expand, Edit,
   TrendCharts, Aim, DataAnalysis, Compass
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useUserStore } from '../stores/user'
-import { aiChatStreamUrl } from '../api/ai'
+import {
+  aiChatStreamUrl,
+  listSessions, createSession, renameSession, deleteSession,
+  getMessages, saveMessages
+} from '../api/ai'
 
 const userStore = useUserStore()
-const STORAGE_KEY = 'ai_chat_messages_v1'
 
-const messages = ref([])     // [{ role, content, reasoning?, streaming?, error? }]
+// ==================== 会话状态 ====================
+const sessions = ref([])
+const currentSessionId = ref(null)
+const sessionsLoading = ref(false)
+const sidebarCollapsed = ref(false)
+const editingSessionId = ref(null)
+const editingTitle = ref('')
+
+const currentSession = computed(() =>
+  sessions.value.find(s => s.id === currentSessionId.value) || null
+)
+
+// ==================== 消息状态 ====================
+const messages = ref([])
+const messagesLoading = ref(false)
 const input = ref('')
 const streaming = ref(false)
 const scrollRef = ref(null)
@@ -165,91 +229,120 @@ const userName = computed(() =>
 const userChar = computed(() => String(userName.value).charAt(0).toUpperCase())
 
 const suggestions = [
-  {
-    title: '技术指标', q: '什么是 MACD 指标？怎么用它判断买卖点？',
-    icon: markRaw(TrendCharts), bg: 'rgba(99,102,241,.15)', color: '#a5b4fc'
-  },
-  {
-    title: '风险管理', q: '止损和止盈应该设置在哪里更合理？',
-    icon: markRaw(Aim), bg: 'rgba(244,63,94,.15)', color: '#fda4af'
-  },
-  {
-    title: '基础概念', q: '解释一下"换手率"这个指标，多少算正常？',
-    icon: markRaw(DataAnalysis), bg: 'rgba(16,185,129,.15)', color: '#6ee7b7'
-  },
-  {
-    title: '策略思考', q: '近期 A 股震荡，普通投资者该如何应对？',
-    icon: markRaw(Compass), bg: 'rgba(245,158,11,.15)', color: '#fcd34d'
-  }
+  { title: '技术指标', q: '什么是 MACD 指标？怎么用它判断买卖点？', icon: markRaw(TrendCharts), bg: 'rgba(99,102,241,.15)', color: '#a5b4fc' },
+  { title: '风险管理', q: '止损和止盈应该设置在哪里更合理？', icon: markRaw(Aim), bg: 'rgba(244,63,94,.15)', color: '#fda4af' },
+  { title: '基础概念', q: '解释一下"换手率"这个指标，多少算正常？', icon: markRaw(DataAnalysis), bg: 'rgba(16,185,129,.15)', color: '#6ee7b7' },
+  { title: '策略思考', q: '近期 A 股震荡，普通投资者该如何应对？', icon: markRaw(Compass), bg: 'rgba(245,158,11,.15)', color: '#fcd34d' }
 ]
 
 // ==================== Markdown 渲染 ====================
-marked.setOptions({
-  breaks: true,    // 单换行 = <br>
-  gfm: true        // GitHub flavor (表格 / 删除线 / 任务列表)
-})
+marked.setOptions({ breaks: true, gfm: true })
 
 const renderMarkdown = (text) => {
   if (!text) return ''
   try {
-    const html = marked.parse(String(text))
-    return DOMPurify.sanitize(html)
+    return DOMPurify.sanitize(marked.parse(String(text)))
   } catch (_) {
     return DOMPurify.sanitize(String(text).replace(/\n/g, '<br>'))
   }
 }
 
-// ==================== 持久化 ====================
-const loadFromStorage = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) messages.value = JSON.parse(raw)
-  } catch (_) { messages.value = [] }
-}
-const saveToStorage = () => {
-  try {
-    const clean = messages.value
-      .filter(m => m.content)
-      .map(m => ({ role: m.role, content: m.content, reasoning: m.reasoning }))
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(clean))
-  } catch (_) { /* ignore quota */ }
+const scrollToBottom = () => {
+  nextTick(() => { if (scrollRef.value) scrollRef.value.scrollTop = scrollRef.value.scrollHeight })
 }
 
-const scrollToBottom = () => {
-  nextTick(() => {
-    const el = scrollRef.value
-    if (el) el.scrollTop = el.scrollHeight
-  })
+// ==================== 会话管理 ====================
+const loadSessions = async () => {
+  sessionsLoading.value = true
+  try {
+    const res = await listSessions()
+    sessions.value = res.data || []
+  } catch (_) {
+    sessions.value = []
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+const newSession = () => {
+  if (streaming.value) return
+  currentSessionId.value = null
+  messages.value = []
+}
+
+const switchSession = async (id) => {
+  if (currentSessionId.value === id || streaming.value) return
+  currentSessionId.value = id
+  messages.value = []
+  messagesLoading.value = true
+  try {
+    const res = await getMessages(id)
+    const raw = res.data || []
+    messages.value = raw.map(m => ({ role: m.role, content: m.content, reasoning: m.reasoning || '' }))
+  } catch (_) {
+    ElMessage.error('加载消息失败')
+  } finally {
+    messagesLoading.value = false
+    scrollToBottom()
+  }
+}
+
+const removeSession = async (id) => {
+  try {
+    await ElMessageBox.confirm('删除该会话及其所有消息？', '提示', {
+      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+    })
+  } catch (_) { return }
+  try {
+    await deleteSession(id)
+    sessions.value = sessions.value.filter(s => s.id !== id)
+    if (currentSessionId.value === id) { currentSessionId.value = null; messages.value = [] }
+    ElMessage.success('已删除')
+  } catch (_) {
+    ElMessage.error('删除失败')
+  }
+}
+
+const startRename = (s) => { editingSessionId.value = s.id; editingTitle.value = s.title }
+const cancelRename = () => { editingSessionId.value = null; editingTitle.value = '' }
+const saveRename = async (id) => {
+  const t = editingTitle.value.trim()
+  if (!t) { cancelRename(); return }
+  editingSessionId.value = null
+  try {
+    await renameSession(id, t)
+    const s = sessions.value.find(x => x.id === id)
+    if (s) s.title = t
+  } catch (_) { ElMessage.error('重命名失败') }
+}
+
+// ==================== 发送前确保存在会话 ====================
+const ensureSession = async () => {
+  if (currentSessionId.value) return currentSessionId.value
+  const res = await createSession('新对话')
+  const s = res.data
+  if (!s) throw new Error('创建会话失败')
+  sessions.value.unshift(s)
+  currentSessionId.value = s.id
+  return s.id
 }
 
 // ==================== 操作 ====================
-const askQuick = (q) => {
-  if (streaming.value) return
-  input.value = q
-  send()
-}
-
-const onShiftEnter = () => { /* default newline behavior */ }
+const askQuick = (q) => { if (streaming.value) return; input.value = q; send() }
+const onShiftEnter = () => {}
 
 const copyText = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制到剪贴板')
-  } catch (_) {
-    ElMessage.warning('复制失败，请手动选择文本')
-  }
+  try { await navigator.clipboard.writeText(text); ElMessage.success('已复制到剪贴板') }
+  catch (_) { ElMessage.warning('复制失败，请手动选择文本') }
 }
 
 const regenerate = async () => {
   if (streaming.value || messages.value.length < 2) return
-  // 移除最后一条 assistant
   const last = messages.value[messages.value.length - 1]
   if (last.role !== 'assistant') return
   messages.value.pop()
-  // 找到上一个 user 问题，作为重发输入
   const lastUser = [...messages.value].reverse().find(m => m.role === 'user')
   if (!lastUser) return
-  // 移除最后一个 user 我们一会儿在 send 里重新 push
   const idx = messages.value.lastIndexOf(lastUser)
   if (idx >= 0) messages.value.splice(idx, 1)
   input.value = lastUser.content
@@ -257,25 +350,28 @@ const regenerate = async () => {
   send()
 }
 
+const clearMessages = () => { messages.value = [] }
+
 const send = async () => {
   const q = input.value.trim()
   if (!q || streaming.value) return
   input.value = ''
 
+  let sessionId
+  try { sessionId = await ensureSession() }
+  catch (e) { ElMessage.error('创建会话失败：' + e.message); return }
+
   messages.value.push({ role: 'user', content: q })
   messages.value.push({ role: 'assistant', content: '', streaming: true })
-  // 重要：从 reactive 数组取回代理，避免直接改原对象绕过响应式
-  const botMsg = messages.value[messages.value.length - 1]
-  saveToStorage()
+  const botRef = messages.value[messages.value.length - 1]
   scrollToBottom()
 
   streaming.value = true
   abortCtrl = new AbortController()
 
-  // 拼上下文：仅完成的消息
   const payload = {
     messages: messages.value
-      .filter(m => m !== botMsg && m.content)
+      .filter(m => m !== botRef && m.content)
       .map(m => ({ role: m.role, content: m.content }))
   }
 
@@ -290,10 +386,7 @@ const send = async () => {
       body: JSON.stringify(payload),
       signal: abortCtrl.signal
     })
-
-    if (!resp.ok || !resp.body) {
-      throw new Error('HTTP ' + resp.status)
-    }
+    if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status)
 
     const reader = resp.body.getReader()
     const decoder = new TextDecoder('utf-8')
@@ -305,16 +398,11 @@ const send = async () => {
       if (!dataLines.length) { currentEvent = 'message'; return }
       const data = dataLines.join('\n')
       dataLines = []
-      if (currentEvent === 'delta') {
-        botMsg.content += data
-        scrollToBottom()
-      } else if (currentEvent === 'reasoning') {
-        if (!botMsg.reasoning) botMsg.reasoning = ''
-        botMsg.reasoning += data
-        scrollToBottom()
-      } else if (currentEvent === 'error') {
-        botMsg.error = data
-      }
+      if (currentEvent === 'delta') { botRef.content += data; scrollToBottom() }
+      else if (currentEvent === 'reasoning') {
+        if (!botRef.reasoning) botRef.reasoning = ''
+        botRef.reasoning += data; scrollToBottom()
+      } else if (currentEvent === 'error') { botRef.error = data }
       currentEvent = 'message'
     }
 
@@ -324,50 +412,47 @@ const send = async () => {
       buf += decoder.decode(value, { stream: true })
       let idx
       while ((idx = buf.indexOf('\n')) >= 0) {
-        const rawLine = buf.slice(0, idx)
+        const line = buf.slice(0, idx).replace(/\r$/, '')
         buf = buf.slice(idx + 1)
-        const line = rawLine.replace(/\r$/, '')
         if (!line) { dispatchEvent(); continue }
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim()
-        } else if (line.startsWith('data:')) {
-          dataLines.push(line.slice(5).replace(/^ /, ''))
-        }
+        if (line.startsWith('event:')) currentEvent = line.slice(6).trim()
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''))
       }
     }
     dispatchEvent()
   } catch (e) {
     if (e.name !== 'AbortError') {
-      botMsg.error = e.message || '请求失败'
+      botRef.error = e.message || '请求失败'
       ElMessage.error('AI 调用失败：' + (e.message || e))
     } else {
-      botMsg.error = '已停止'
+      botRef.error = '已停止'
     }
   } finally {
-    botMsg.streaming = false
+    botRef.streaming = false
     streaming.value = false
     abortCtrl = null
-    saveToStorage()
     scrollToBottom()
+    // 持久化本轮消息到服务端
+    if (botRef.content && sessionId) {
+      const toSave = [
+        { role: 'user', content: q },
+        { role: 'assistant', content: botRef.content, reasoning: botRef.reasoning || '' }
+      ]
+      saveMessages(sessionId, toSave)
+        .then(() => loadSessions())
+        .catch(() => {})
+    }
   }
 }
 
-const stopStream = () => {
-  if (abortCtrl) abortCtrl.abort()
-}
+const stopStream = () => { if (abortCtrl) abortCtrl.abort() }
 
-const clearChat = () => {
-  messages.value = []
-  saveToStorage()
-}
-
-onMounted(() => {
-  loadFromStorage()
+onMounted(async () => {
+  await loadSessions()
+  if (sessions.value.length) switchSession(sessions.value[0].id)
   scrollToBottom()
 })
-onUnmounted(() => {
-  if (abortCtrl) abortCtrl.abort()
-})
+onUnmounted(() => { if (abortCtrl) abortCtrl.abort() })
 </script>
 
 <style scoped>
@@ -375,12 +460,142 @@ onUnmounted(() => {
 .ai-page {
   height: 100%;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  overflow: hidden;
   background:
     radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.08), transparent 40%),
     radial-gradient(circle at 100% 100%, rgba(59, 130, 246, 0.06), transparent 40%),
     #0b0c10;
   font-feature-settings: 'tnum';
+}
+
+/* ============ 侧边栏 ============ */
+.ai-sidebar {
+  width: 240px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  background: rgba(11,12,16,0.85);
+  transition: width .2s ease, min-width .2s ease;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.ai-sidebar.collapsed { width: 52px; min-width: 52px; }
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  flex-shrink: 0;
+}
+.new-chat-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 8px;
+  color: #a5b4fc;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.new-chat-btn:hover:not(:disabled) { background: rgba(99,102,241,0.22); }
+.new-chat-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.collapse-btn {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all .15s;
+}
+.collapse-btn:hover { border-color: rgba(255,255,255,0.2); color: #d1d5db; }
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-list::-webkit-scrollbar { width: 4px; }
+.session-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+.session-loading, .session-empty {
+  color: #6b7280;
+  font-size: 12px;
+  text-align: center;
+  padding: 20px 0;
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s;
+  min-width: 0;
+}
+.session-item:hover { background: rgba(255,255,255,0.04); }
+.session-item.active { background: rgba(99,102,241,0.12); }
+.session-icon { flex-shrink: 0; color: #6b7280; font-size: 13px; }
+.session-item.active .session-icon { color: #a5b4fc; }
+.session-info { flex: 1; min-width: 0; }
+.session-title {
+  color: #d1d5db;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-item.active .session-title { color: #e0e7ff; }
+.session-edit-input { flex: 1; }
+.session-edit-input :deep(.el-input__inner) { font-size: 12px; }
+.session-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.session-item:hover .session-actions,
+.session-item.active .session-actions { display: flex; }
+.sess-action-btn {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all .15s;
+}
+.sess-action-btn:hover { background: rgba(255,255,255,0.06); color: #d1d5db; }
+.sess-action-btn.danger:hover { color: #f87171; }
+
+/* ============ 主聊天区 ============ */
+.ai-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.msgs-loading {
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+  padding: 24px 0;
 }
 
 /* ============ 顶部条 ============ */

@@ -23,7 +23,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
       registry.addMapping("/**") // 所有接口
               .allowCredentials(true) // 是否发送 Cookie
               .allowedOriginPatterns("*") // 支持域
-              .allowedMethods(new String[]{"GET", "POST", "PUT", "DELETE", "OPTIONS"}) // 支持方法, 必须加OPTIONS
+              .allowedMethods(new String[]{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"}) // 支持方法, 必须加OPTIONS
               .allowedHeaders("*")
               .exposedHeaders("*");
     }
