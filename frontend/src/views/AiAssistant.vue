@@ -13,9 +13,12 @@
         </button>
       </div>
       <div v-if="!sidebarCollapsed" class="session-list">
+        <div class="session-search-wrap">
+          <el-input v-model="sessionSearch" placeholder="搜索会话…" size="small" clearable class="session-search" />
+        </div>
         <div v-if="sessionsLoading" class="session-loading">加载中…</div>
-        <div v-else-if="!sessions.length" class="session-empty">暂无会话</div>
-        <div v-for="s in sessions" :key="s.id"
+        <div v-else-if="!filteredSessions.length" class="session-empty">{{ sessionSearch ? '无匹配结果' : '暂无会话' }}</div>
+        <div v-for="s in filteredSessions" :key="s.id"
              class="session-item" :class="{ active: currentSessionId === s.id }"
              @click="switchSession(s.id)">
           <el-icon class="session-icon"><ChatDotRound /></el-icon>
@@ -58,6 +61,9 @@
         <div class="flex items-center gap-2">
           <el-button v-if="streaming" type="danger" plain size="small" @click="stopStream">
             <el-icon class="mr-1"><CircleClose /></el-icon>停止生成
+          </el-button>
+          <el-button :disabled="!messages.length" plain size="small" @click="exportChat" title="导出为 Markdown">
+            <el-icon class="mr-1"><Download /></el-icon>导出
           </el-button>
           <el-button :disabled="streaming || !messages.length" plain size="small" @click="clearMessages">
             <el-icon class="mr-1"><Delete /></el-icon>清空消息
@@ -151,6 +157,35 @@
 
       <!-- 输入栏 -->
       <footer class="ai-inputbar">
+        <!-- 已选股票标签行 -->
+        <div v-if="pinnedStocks.length" class="stock-tags-row">
+          <span class="stock-tags-label"><el-icon><TrendCharts /></el-icon> 行情上下文：</span>
+          <span v-for="s in pinnedStocks" :key="s.stockCode" class="stock-tag">
+            {{ s.stockName }}（{{ s.stockCode }}）
+            <button class="stock-tag-remove" @click="removePinnedStock(s.stockCode)">×</button>
+          </span>
+        </div>
+
+        <!-- 股票选择器弹出层 -->
+        <div v-if="stockPickerVisible" class="stock-picker-panel" @click.stop>
+          <el-input v-model="stockPickerQuery" placeholder="搜索股票代码或名称…"
+                    size="small" clearable autofocus class="stock-picker-input"
+                    @input="onStockPickerQuery" />
+          <div class="stock-picker-list">
+            <div v-if="stockPickerLoading" class="stock-picker-tip">加载中…</div>
+            <div v-else-if="!filteredStockOptions.length" class="stock-picker-tip">无匹配结果</div>
+            <div v-for="opt in filteredStockOptions" :key="opt.stockCode"
+                 class="stock-picker-item"
+                 :class="{ selected: isPinned(opt.stockCode) }"
+                 @click="togglePinnedStock(opt)">
+              <span class="spi-code">{{ opt.stockCode }}</span>
+              <span class="spi-name">{{ opt.stockName }}</span>
+              <span class="spi-market">{{ opt.market }}</span>
+              <el-icon v-if="isPinned(opt.stockCode)" class="spi-check"><Check /></el-icon>
+            </div>
+          </div>
+        </div>
+
         <div class="ai-input-wrap">
           <el-input
             v-model="input"
@@ -164,6 +199,12 @@
             @keydown.enter.shift.exact="onShiftEnter"
           />
           <div class="ai-input-meta">
+            <button class="ai-stock-btn" :class="{ active: stockPickerVisible || pinnedStocks.length }"
+                    title="@ 股票行情" @click.stop="toggleStockPicker">
+              <el-icon><TrendCharts /></el-icon>
+              <span>@ 股票</span>
+              <span v-if="pinnedStocks.length" class="stock-badge">{{ pinnedStocks.length }}</span>
+            </button>
             <span class="ai-counter" :class="{ 'is-warn': input.length > 1500 }">
               {{ input.length }} 字
             </span>
@@ -189,7 +230,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ChatDotRound, Delete, CircleClose, Promotion, Cpu, ArrowRight,
   Warning, CopyDocument, RefreshRight, Loading,
-  Plus, Fold, Expand, Edit,
+  Plus, Fold, Expand, Edit, Download, Check,
   TrendCharts, Aim, DataAnalysis, Compass
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
@@ -200,6 +241,7 @@ import {
   listSessions, createSession, renameSession, deleteSession,
   getMessages, saveMessages
 } from '../api/ai'
+import { getStockList, getStockDetail } from '../api/market'
 
 const userStore = useUserStore()
 
@@ -210,6 +252,78 @@ const sessionsLoading = ref(false)
 const sidebarCollapsed = ref(false)
 const editingSessionId = ref(null)
 const editingTitle = ref('')
+const sessionSearch = ref('')
+
+// ==================== @ 股票选择器 ====================
+const pinnedStocks = ref([])           // [{ stockCode, stockName, market }]
+const stockPickerVisible = ref(false)
+const stockPickerQuery = ref('')
+const stockPickerLoading = ref(false)
+const allStockOptions = ref([])        // 从 /stock/list 懒加载一次
+
+const filteredStockOptions = computed(() => {
+  const q = stockPickerQuery.value.trim().toLowerCase()
+  const list = allStockOptions.value
+  if (!q) return list.slice(0, 50)
+  return list.filter(s =>
+    s.stockCode.includes(q) || s.stockName.toLowerCase().includes(q)
+  ).slice(0, 50)
+})
+
+const isPinned = (code) => pinnedStocks.value.some(s => s.stockCode === code)
+
+const toggleStockPicker = async () => {
+  stockPickerVisible.value = !stockPickerVisible.value
+  if (stockPickerVisible.value && !allStockOptions.value.length) {
+    stockPickerLoading.value = true
+    try {
+      const res = await getStockList()
+      allStockOptions.value = res.data || []
+    } catch (_) {
+      ElMessage.error('加载股票列表失败')
+    } finally {
+      stockPickerLoading.value = false
+    }
+  }
+}
+
+const onStockPickerQuery = () => {} // 直接走 computed 过滤，无需额外处理
+
+const togglePinnedStock = (opt) => {
+  if (isPinned(opt.stockCode)) {
+    removePinnedStock(opt.stockCode)
+  } else {
+    if (pinnedStocks.value.length >= 5) { ElMessage.warning('最多同时选择 5 支股票'); return }
+    pinnedStocks.value.push({ stockCode: opt.stockCode, stockName: opt.stockName, market: opt.market })
+  }
+}
+
+const removePinnedStock = (code) => {
+  pinnedStocks.value = pinnedStocks.value.filter(s => s.stockCode !== code)
+}
+
+const buildStockContext = async () => {
+  if (!pinnedStocks.value.length) return ''
+  const lines = []
+  for (const s of pinnedStocks.value) {
+    try {
+      const res = await getStockDetail(s.stockCode)
+      const q = res.data
+      if (!q) continue
+      const pct = q.changePercent != null ? (q.changePercent > 0 ? '+' : '') + q.changePercent.toFixed(2) + '%' : 'N/A'
+      lines.push(`- ${q.stockName || s.stockName}（${s.stockCode}.${s.market}）：最新价 ${q.currentPrice ?? q.closePrice ?? 'N/A'}，涨跌幅 ${pct}，行业：${q.industryName || s.industryName || '-'}`)
+    } catch (_) {
+      lines.push(`- ${s.stockName}（${s.stockCode}）：行情获取失败`)
+    }
+  }
+  if (!lines.length) return ''
+  return `[行情上下文 - ${new Date().toLocaleDateString('zh-CN')}]\n以下是用户关注的股票最新行情，请结合此数据回答问题：\n${lines.join('\n')}\n`
+}
+
+const filteredSessions = computed(() => {
+  const q = sessionSearch.value.trim().toLowerCase()
+  return q ? sessions.value.filter(s => s.title.toLowerCase().includes(q)) : sessions.value
+})
 
 const currentSession = computed(() =>
   sessions.value.find(s => s.id === currentSessionId.value) || null
@@ -352,14 +466,39 @@ const regenerate = async () => {
 
 const clearMessages = () => { messages.value = [] }
 
+const exportChat = () => {
+  if (!messages.value.length) return
+  const title = currentSession.value?.title || '对话记录'
+  const lines = messages.value
+    .filter(m => m.content)
+    .map(m => {
+      const name = m.role === 'user' ? '## 用户' : '## 小智'
+      const reasoning = m.reasoning ? `\n<details>\n<summary>思考过程</summary>\n\n${m.reasoning}\n</details>\n` : ''
+      return `${name}\n\n${reasoning}${m.content}`
+    })
+  const md = `# ${title}\n\n${lines.join('\n\n---\n\n')}\n`
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `${title}.md`; a.click()
+  URL.revokeObjectURL(url)
+}
+
 const send = async () => {
   const q = input.value.trim()
   if (!q || streaming.value) return
   input.value = ''
+  stockPickerVisible.value = false
+
+  // 先构建行情上下文，再清空已选股票
+  const stockCtx = await buildStockContext()
+  pinnedStocks.value = []
 
   let sessionId
   try { sessionId = await ensureSession() }
   catch (e) { ElMessage.error('创建会话失败：' + e.message); return }
+
+  const userContent = stockCtx ? `${stockCtx}\n${q}` : q
 
   messages.value.push({ role: 'user', content: q })
   messages.value.push({ role: 'assistant', content: '', streaming: true })
@@ -370,9 +509,14 @@ const send = async () => {
   abortCtrl = new AbortController()
 
   const payload = {
-    messages: messages.value
-      .filter(m => m !== botRef && m.content)
-      .map(m => ({ role: m.role, content: m.content }))
+    messages: [
+      ...messages.value
+        .filter(m => m !== botRef && m.content)
+        .slice(-20)
+        .slice(0, -1)  // 去掉最后一条 user（因为要用含行情的版本替换）
+        .map(m => ({ role: m.role, content: m.content })),
+      { role: 'user', content: userContent }
+    ]
   }
 
   try {
@@ -447,12 +591,18 @@ const send = async () => {
 
 const stopStream = () => { if (abortCtrl) abortCtrl.abort() }
 
+const onDocClick = () => { stockPickerVisible.value = false }
+
 onMounted(async () => {
   await loadSessions()
   if (sessions.value.length) switchSession(sessions.value[0].id)
   scrollToBottom()
+  document.addEventListener('click', onDocClick)
 })
-onUnmounted(() => { if (abortCtrl) abortCtrl.abort() })
+onUnmounted(() => {
+  if (abortCtrl) abortCtrl.abort()
+  document.removeEventListener('click', onDocClick)
+})
 </script>
 
 <style scoped>
@@ -530,6 +680,13 @@ onUnmounted(() => { if (abortCtrl) abortCtrl.abort() })
 }
 .session-list::-webkit-scrollbar { width: 4px; }
 .session-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+.session-search-wrap { padding: 6px 2px 4px; flex-shrink: 0; }
+.session-search :deep(.el-input__wrapper) {
+  background: rgba(255,255,255,0.04);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset;
+  border-radius: 6px;
+}
+.session-search :deep(.el-input__inner) { color: #d1d5db; font-size: 12px; }
 .session-loading, .session-empty {
   color: #6b7280;
   font-size: 12px;
@@ -1044,6 +1201,114 @@ onUnmounted(() => { if (abortCtrl) abortCtrl.abort() })
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
   color: #d1d5db;
+}
+
+/* ============ @ 股票选择器 ============ */
+.stock-tags-row {
+  max-width: 860px;
+  margin: 0 auto 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+.stock-tags-label {
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.stock-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 20px;
+  color: #a5b4fc;
+  font-size: 12px;
+}
+.stock-tag-remove {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  transition: color .15s;
+}
+.stock-tag-remove:hover { color: #f87171; }
+
+.stock-picker-panel {
+  max-width: 860px;
+  margin: 0 auto 8px;
+  background: #13141a;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.stock-picker-input { margin-bottom: 8px; }
+.stock-picker-input :deep(.el-input__wrapper) {
+  background: rgba(255,255,255,0.04);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset;
+}
+.stock-picker-list {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stock-picker-list::-webkit-scrollbar { width: 4px; }
+.stock-picker-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+.stock-picker-tip { color: #6b7280; font-size: 12px; text-align: center; padding: 16px 0; }
+.stock-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s;
+  font-size: 13px;
+}
+.stock-picker-item:hover { background: rgba(255,255,255,0.05); }
+.stock-picker-item.selected { background: rgba(99,102,241,0.1); }
+.spi-code { color: #a5b4fc; font-size: 12px; font-family: monospace; width: 52px; flex-shrink: 0; }
+.spi-name { color: #e5e7eb; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spi-market { color: #6b7280; font-size: 11px; flex-shrink: 0; }
+.spi-check { color: #a5b4fc; font-size: 12px; flex-shrink: 0; }
+
+.ai-stock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #6b7280;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  position: relative;
+}
+.ai-stock-btn:hover { border-color: rgba(99,102,241,0.4); color: #a5b4fc; }
+.ai-stock-btn.active { border-color: rgba(99,102,241,0.5); color: #a5b4fc; background: rgba(99,102,241,0.08); }
+.stock-badge {
+  position: absolute;
+  top: -5px; right: -5px;
+  width: 16px; height: 16px;
+  background: #6366f1;
+  border-radius: 50%;
+  font-size: 10px;
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
 }
 
 /* ============ 输入栏 ============ */

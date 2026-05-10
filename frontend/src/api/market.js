@@ -16,3 +16,6 @@ export const getQuotes = () => request.get('/stock/quotes')
  */
 export const getKline = (code, limit = 60) =>
   request.get(`/stock/kline/${code}`, { params: { limit } })
+
+/** 单只股票实时行情 */
+export const getStockDetail = (code) => request.get(`/stock/detail/${code}`)
