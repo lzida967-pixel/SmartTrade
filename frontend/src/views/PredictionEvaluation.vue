@@ -157,6 +157,7 @@ const renderTimelineChart = () => {
 }
 
 const onResize = () => timelineChart?.resize()
+let timelineRO = null
 
 // ---------- 跳转 ----------
 const goToPredict = (code) => router.push({ path: '/prediction', query: { code } })
@@ -164,10 +165,16 @@ const goToPredict = (code) => router.push({ path: '/prediction', query: { code }
 // ---------- 生命周期 ----------
 onMounted(() => {
   window.addEventListener('resize', onResize)
-  loadAll()
+  loadAll().then(() => {
+    if (timelineChartRef.value && !timelineRO) {
+      timelineRO = new ResizeObserver(() => timelineChart?.resize())
+      timelineRO.observe(timelineChartRef.value)
+    }
+  })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
+  timelineRO?.disconnect()
   timelineChart?.dispose()
 })
 watch(days, loadAll)
@@ -180,7 +187,7 @@ const noData = computed(() => {
 </script>
 
 <template>
-  <div class="p-8 flex flex-col gap-6">
+  <div class="px-8 py-6 flex flex-col gap-8">
     <!-- 顶部标题 -->
     <div class="flex items-start justify-between flex-wrap gap-4">
       <div>
@@ -217,14 +224,15 @@ const noData = computed(() => {
     />
 
     <!-- 三模型卡片 -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
       <div
         v-for="m in overview.models"
         :key="m.modelVersion"
-        class="rounded-2xl border border-gray-800 bg-gray-900/40 p-5 flex flex-col gap-4"
+        class="rounded-2xl border border-gray-800 bg-gray-900/40 flex flex-col gap-8"
+        style="padding: 28px;"
       >
         <!-- 模型名 + 标签 -->
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between py-3">
           <div class="flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full" :style="{ background: modelColor(m.modelVersion) }"></span>
             <span class="font-semibold text-gray-100">{{ m.modelName }}</span>
@@ -237,7 +245,7 @@ const noData = computed(() => {
         </div>
 
         <!-- 圆环 + 数字 -->
-        <div class="flex items-center gap-5">
+        <div class="flex items-center gap-6">
           <el-progress
             type="circle"
             :percentage="m.verifiedCount > 0 ? +(Number(m.accuracy) * 100).toFixed(1) : 0"
@@ -250,7 +258,7 @@ const noData = computed(() => {
               </span>
             </template>
           </el-progress>
-          <div class="flex-1 space-y-2 text-sm">
+          <div class="flex-1 space-y-3 text-sm">
             <div class="flex justify-between">
               <span class="text-gray-500">已验证</span>
               <span class="font-mono text-gray-200">{{ m.verifiedCount }} 条</span>
@@ -268,20 +276,20 @@ const noData = computed(() => {
 
         <!-- 混淆矩阵 -->
         <div>
-          <div class="text-xs text-gray-500 mb-2 flex items-center justify-between">
+          <div class="text-xs text-gray-500 mb-4 flex items-center justify-between">
             <span>混淆矩阵 <span class="text-gray-700">(行 = 实际 / 列 = 预测)</span></span>
           </div>
-          <div class="grid grid-cols-[60px_repeat(3,1fr)] gap-1 text-[11px]">
+          <div class="grid grid-cols-[60px_repeat(3,1fr)] gap-2 text-[11px]">
             <!-- 表头 -->
             <div></div>
             <div v-for="(name, j) in overview.labelNames" :key="'h'+j"
-                 class="text-center text-gray-500 font-semibold py-1">{{ name }}</div>
+                 class="text-center text-gray-500 font-semibold py-2">{{ name }}</div>
             <!-- 三行 -->
             <template v-for="(rowName, i) in overview.labelNames" :key="'r'+i">
-              <div class="text-right pr-2 text-gray-500 font-semibold py-1 self-center">{{ rowName }}</div>
+              <div class="text-right pr-2 text-gray-500 font-semibold py-2 self-center">{{ rowName }}</div>
               <div
                 v-for="(_, j) in overview.labelNames" :key="'c'+i+j"
-                class="text-center py-2 rounded text-gray-100 font-mono font-bold"
+                class="text-center py-3 rounded text-gray-100 font-mono font-bold"
                 :style="{ background: cellBg(m.confusionMatrix, i, j) }"
               >
                 {{ m.confusionMatrix?.[i]?.[j] || 0 }}
@@ -299,7 +307,7 @@ const noData = computed(() => {
     </div>
 
     <!-- 按日准确率折线 -->
-    <div class="rounded-2xl border border-gray-800 bg-gray-900/40 p-5">
+    <div class="rounded-2xl border border-gray-800 bg-gray-900/40" style="padding: 28px;">
       <div class="flex items-center justify-between mb-3">
         <div class="text-sm font-semibold text-gray-200 flex items-center gap-2">
           <el-icon class="text-indigo-400"><DataAnalysis /></el-icon>
@@ -314,7 +322,7 @@ const noData = computed(() => {
     </div>
 
     <!-- 按股票排行 -->
-    <div class="rounded-2xl border border-gray-800 bg-gray-900/40 p-5">
+    <div class="rounded-2xl border border-gray-800 bg-gray-900/40" style="padding: 28px;">
       <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div class="text-sm font-semibold text-gray-200 flex items-center gap-2">
           <el-icon class="text-amber-400"><Histogram /></el-icon>
@@ -370,7 +378,7 @@ const noData = computed(() => {
     </div>
 
     <!-- 底部说明 -->
-    <div class="rounded-2xl border border-gray-800 bg-gray-900/30 p-5">
+    <div class="rounded-2xl border border-gray-800 bg-gray-900/30" style="padding: 28px;">
       <div class="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
         <el-icon class="text-indigo-400"><MagicStick /></el-icon>
         指标说明
