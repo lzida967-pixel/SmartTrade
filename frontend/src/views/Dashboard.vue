@@ -406,10 +406,11 @@ const loadDeals = async () => {
 const reload = async () => {
   loading.value = true
   try {
-    await Promise.all([loadStockMap(), loadAsset(), loadCurve(), loadDeals()])
+    // 先把 totalAssets 拿到，否则 loadCurve 里计算 dailyProfit 会用到 0 → 显示 -100%
+    await loadAsset()
+    await Promise.all([loadStockMap(), loadCurve(), loadDeals()])
     await nextTick()
     renderPie()
-    // loadCurve 完成时 totalAssets 可能还没拿到；这里再补刷一次让虚线段能拼上
     renderCurve()
   } finally {
     loading.value = false
