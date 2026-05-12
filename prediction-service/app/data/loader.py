@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import socket
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -129,6 +130,7 @@ def _parquet_path(code: str) -> Path:
 def _fetch_baostock(code: str, start_iso: str, end_iso: str) -> pd.DataFrame | None:
     """baostock 拉取日 K 线（前复权 adjustflag=2）。"""
     _ensure_bs_login()
+    socket.setdefaulttimeout(30)  # 30 秒无响应则抛 socket.timeout
     bs_code = _to_bs_code(code)
     fields = (
         "date,code,open,high,low,close,preclose,volume,amount,"
@@ -210,6 +212,7 @@ def fetch_history(
             last_err = e
             wait = backoff ** attempt
             logger.warning(f"[{code}] baostock 第 {attempt}/{retries} 次失败: {e}. {wait:.1f}s 后重试")
+            bs_reset_login()  # 超时/断连后重置会话，下次重新登录
             time.sleep(wait)
 
     logger.info(f"[{code}] baostock 全失败，兜底 akshare")

@@ -99,7 +99,7 @@ def main() -> int:
     parser.add_argument("--reload-url", type=str,
                         default="http://127.0.0.1:8001/predict/_reload",
                         help="FastAPI 重载接口地址")
-    parser.add_argument("--sleep", type=float, default=0.05,
+    parser.add_argument("--sleep", type=float, default=0.5,
                         help="拉取数据时单只之间的间隔秒数")
     args = parser.parse_args()
 
