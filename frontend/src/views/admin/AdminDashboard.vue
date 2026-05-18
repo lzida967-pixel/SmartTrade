@@ -106,7 +106,7 @@
 
     <!-- AI 模型准确率 -->
     <div class="admin-card p-5">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <div class="flex items-center justify-between flex-wrap gap-2" style="margin-bottom: 1rem !important;">
         <div class="text-sm text-gray-200 font-medium flex items-center gap-2">
           <el-icon class="text-purple-400"><MagicStick /></el-icon>
           AI 模型近 {{ statsDays }} 天准确率
@@ -123,7 +123,7 @@
           </el-button>
         </div>
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
         <div v-for="m in stats" :key="m.modelVersion" class="model-stat-card">
           <div class="flex items-center justify-between mb-2">
             <div class="flex items-center gap-2">

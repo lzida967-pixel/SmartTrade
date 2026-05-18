@@ -7,20 +7,20 @@
     <!-- 左侧菜单 -->
     <aside class="admin-aside w-60 shrink-0 flex flex-col relative z-10 h-screen sticky top-0">
       <!-- Logo -->
-      <div class="h-16 flex items-center gap-3 px-5 border-b border-white/5">
-        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+      <div class="h-16 flex items-center gap-3 pr-5 pl-5 border-b border-white/5">
+        <div class="w-9 h-9 ml-2 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
           <el-icon class="text-white text-lg"><Monitor /></el-icon>
         </div>
         <div class="leading-tight">
-          <div class="text-[15px] font-semibold text-gray-100">Admin Console</div>
-          <div class="text-[10px] text-gray-500 font-mono tracking-[0.2em] mt-0.5">SMARTTRADE</div>
+          <div class="text-[15px] font-semibold text-gray-100">管理后台</div>
+          <div class="text-[10px] text-gray-500 font-mono tracking-[0.2em] mt-0.5">智能交易</div>
         </div>
       </div>
 
       <!-- 主导航 -->
-      <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-6">
+      <nav class="flex-1 overflow-y-auto py-4 pr-3 pl-5 space-y-6">
         <div>
-          <div class="px-3 mb-2 text-[10px] font-semibold tracking-[0.2em] text-gray-600">MANAGEMENT</div>
+          <div class="pl-1 mb-2 text-[10px] font-semibold tracking-[0.2em] text-gray-600">系统管理</div>
           <router-link
             v-for="item in menus"
             :key="item.path"
@@ -36,9 +36,9 @@
       </nav>
 
       <!-- 底部账号区 -->
-      <div class="border-t border-white/5 p-3">
-        <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.02] mb-2">
-          <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
+      <div class="border-t border-white/5 pr-3 pl-5 py-3">
+        <div class="flex items-center gap-3 pr-3 py-2 rounded-lg bg-white/[0.02] mb-2">
+          <div class="w-9 h-9 ml-2 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
             {{ avatarChar }}
           </div>
           <div class="min-w-0">
@@ -46,7 +46,7 @@
               {{ userStore.userInfo?.nickname || userStore.userInfo?.username || '管理员' }}
             </div>
             <div class="text-[10px] text-indigo-300 font-mono tracking-wider">
-              {{ userStore.userInfo?.role || 'ADMIN' }}
+              {{ userStore.userInfo?.role || '管理员' }}
             </div>
           </div>
         </div>
@@ -142,6 +142,7 @@ const logout = () => {
 .admin-aside {
   background: linear-gradient(180deg, #0b0d15 0%, #07080d 100%);
   border-right: 1px solid rgba(255, 255, 255, 0.04);
+  padding-left: 12px;
 }
 .admin-header {
   background: rgba(7, 8, 13, 0.7);
@@ -152,7 +153,7 @@ const logout = () => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 12px;
+  padding: 9px 12px 9px 16px;
   border-radius: 10px;
   font-size: 13.5px;
   color: #9ca3af;
