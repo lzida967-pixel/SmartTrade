@@ -194,7 +194,7 @@ def fetch_history(
     retries: int = 2,
     backoff: float = 1.5,
 ) -> pd.DataFrame | None:
-    """拉取单只股票日 K 线。先 baostock，失败兜底 akshare。
+    """拉取单只股票日 K 线。baostock 两次失败后直接返回 None。
 
     start/end: YYYYMMDD 格式（与脚本兼容），内部转 ISO。
     """
@@ -215,12 +215,8 @@ def fetch_history(
             bs_reset_login()  # 超时/断连后重置会话，下次重新登录
             time.sleep(wait)
 
-    logger.info(f"[{code}] baostock 全失败，兜底 akshare")
-    try:
-        return _fetch_akshare(code, start, end)
-    except Exception as e:
-        logger.error(f"[{code}] akshare 也失败: {e}（baostock 最后错误: {last_err}）")
-        return None
+    logger.error(f"[{code}] baostock 连续 {retries} 次失败，停止拉取该股票（最后错误: {last_err}）")
+    return None
 
 
 def save_kline(df: pd.DataFrame, code: str) -> Path:
@@ -256,6 +252,7 @@ def fetch_pool(
                 result[code] = "cached"
                 logger.info(f"[{i}/{total}] {code} 已缓存，跳过")
                 continue
+            logger.info(f"[{i}/{total}] 开始拉取 {code}")
             df = fetch_history(code, start, end)
             if df is None or df.empty:
                 result[code] = "empty"
