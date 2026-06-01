@@ -105,7 +105,7 @@ public class AiChatService {
             if (resp.statusCode() != 200) {
                 String errBody = resp.body().limit(50).reduce("", (a, b) -> a + b);
                 log.warn("AI 上游响应非 200：status={}, body={}", resp.statusCode(), errBody);
-                sendError(emitter, "AI 服务返回错误：" + resp.statusCode());
+                sendError(emitter, buildUpstreamErrorMessage(resp.statusCode(), errBody));
                 return;
             }
 
@@ -180,5 +180,29 @@ public class AiChatService {
             emitter.send(SseEmitter.event().name("error").data(msg));
         } catch (IOException ignore) { /* nothing to do */ }
         emitter.complete();
+    }
+
+    private String buildUpstreamErrorMessage(int statusCode, String responseBody) {
+        String fallback = "AI 服务返回错误：" + statusCode;
+        if (responseBody == null || responseBody.isBlank()) {
+            return fallback;
+        }
+        try {
+            JsonNode error = mapper.readTree(responseBody).path("error");
+            String code = error.path("code").asText("");
+            String message = error.path("message").asText("");
+            if ("AllocationQuota.FreeTierOnly".equals(code)) {
+                return "AI 助手当前使用的 DashScope 模型免费额度已耗尽。请在 DashScope 控制台关闭“仅使用免费额度”模式，或更换有额度/已开通付费的模型后再试。";
+            }
+            if (code.toLowerCase().contains("quota") || message.toLowerCase().contains("quota")) {
+                return "AI 助手模型额度不足或已用尽，请检查 DashScope 控制台额度、计费模式和当前模型配置。";
+            }
+            if (!message.isBlank()) {
+                return fallback + "：" + message;
+            }
+        } catch (Exception e) {
+            log.debug("解析 AI 上游错误响应失败: {}", e.getMessage());
+        }
+        return fallback;
     }
 }

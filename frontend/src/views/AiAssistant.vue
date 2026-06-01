@@ -546,7 +546,10 @@ const send = async () => {
       else if (currentEvent === 'reasoning') {
         if (!botRef.reasoning) botRef.reasoning = ''
         botRef.reasoning += data; scrollToBottom()
-      } else if (currentEvent === 'error') { botRef.error = data }
+      } else if (currentEvent === 'error') {
+        botRef.error = data
+        ElMessage.error(data)
+      }
       currentEvent = 'message'
     }
 

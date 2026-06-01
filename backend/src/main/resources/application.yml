@@ -72,7 +72,8 @@ smarttrade:
       enabled: true
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api-key: ${DASHSCOPE_API_KEY:} # 通过环境变量提供，仓库不存明文
-      model: qwen3.5-122b-a10b
+#      model: qwen3.5-122b-a10b
+      model: qwen3.7-max-2026-05-20
       timeout-seconds: 60
       max-history: 20         # 拼上下文时最多带这么多轮历史，避免 token 爆炸
       system-prompt: |
