@@ -3,6 +3,7 @@ package com.smarttrade.task;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.smarttrade.entity.UserAssetSnapshot;
 import com.smarttrade.service.AssetService;
+import com.smarttrade.service.CacheService;
 import com.smarttrade.service.UserAssetSnapshotService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 
 /**
  * 用户资产每日快照任务
@@ -30,8 +32,13 @@ public class AssetSnapshotScheduler {
     @Autowired
     private UserAssetSnapshotService userAssetSnapshotService;
 
+    @Autowired
+    private CacheService cacheService;
+
     @Value("${smarttrade.asset-snapshot.cold-start:true}")
     private boolean coldStart;
+
+    private static final LocalTime SNAPSHOT_TIME = LocalTime.of(16, 35);
 
     /**
      * 每日 16:35（默认）拍一次快照。比行情同步任务（16:30）晚 5 分钟，确保最新价已落库。
@@ -41,6 +48,7 @@ public class AssetSnapshotScheduler {
         log.info("[定时] 开始拍用户资产快照...");
         long start = System.currentTimeMillis();
         int success = assetService.upsertAllUsersTodaySnapshot();
+        cacheService.evictByPattern("user:curve:*");
         log.info("[定时] 资产快照完成: 成功 {} 个用户, 耗时 {} ms",
                 success, System.currentTimeMillis() - start);
     }
@@ -54,6 +62,15 @@ public class AssetSnapshotScheduler {
         new Thread(() -> {
             try {
                 Thread.sleep(5000); // 等其它启动任务完成
+                LocalTime now = LocalTime.now();
+                if (!now.isBefore(SNAPSHOT_TIME)) {
+                    log.info("[启动补偿] 当前已过 {}，补拍/覆盖今日资产快照...", SNAPSHOT_TIME);
+                    int success = assetService.upsertAllUsersTodaySnapshot();
+                    cacheService.evictByPattern("user:curve:*");
+                    log.info("[启动补偿] 今日资产快照完成: 成功 {} 个用户", success);
+                    return;
+                }
+
                 long todayCount = userAssetSnapshotService.count(
                         new LambdaQueryWrapper<UserAssetSnapshot>()
                                 .eq(UserAssetSnapshot::getSnapshotDate, LocalDate.now())
@@ -64,6 +81,7 @@ public class AssetSnapshotScheduler {
                 }
                 log.info("[冷启动] 今日资产快照为空，立即拍一次...");
                 int success = assetService.upsertAllUsersTodaySnapshot();
+                cacheService.evictByPattern("user:curve:*");
                 log.info("[冷启动] 资产快照完成: 成功 {} 个用户", success);
             } catch (Exception e) {
                 log.warn("资产快照冷启动失败: {}", e.getMessage());
